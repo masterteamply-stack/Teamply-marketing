@@ -1,0 +1,776 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
+import '../../theme/app_theme.dart';
+import '../../providers/app_provider.dart';
+import '../../models/models.dart';
+import '../../widgets/csv_task_upload_dialog.dart';
+import '../../widgets/edit_dialog.dart';
+
+class ProjectDetailPage extends StatefulWidget {
+  const ProjectDetailPage({super.key});
+
+  @override
+  State<ProjectDetailPage> createState() => _ProjectDetailPageState();
+}
+
+class _ProjectDetailPageState extends State<ProjectDetailPage> with SingleTickerProviderStateMixin {
+  late TabController _tab;
+  String _filterMember = 'all';
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AppProvider>();
+    final project = provider.selectedProject;
+    if (project == null) return const Center(child: Text('프로젝트를 선택해주세요', style: TextStyle(color: AppTheme.textMuted)));
+
+    final projColor = Color(int.parse('0xFF${project.colorHex.substring(1)}'));
+    final doneTasks = project.tasks.where((t) => t.status == TaskStatus.done).length;
+    final fmt = NumberFormat('#,###');
+
+    return Scaffold(
+      backgroundColor: AppTheme.bgDark,
+      body: Column(
+        children: [
+          // Project Header
+          Container(
+            padding: const EdgeInsets.fromLTRB(28, 24, 28, 0),
+            color: AppTheme.bgCard,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  // Breadcrumb
+                  TextButton(
+                    onPressed: () => provider.selectTeam(project.teamId),
+                    child: const Text('← 팀으로 돌아가기', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  ),
+                ]),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: projColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+                    child: Text(project.iconEmoji, style: const TextStyle(fontSize: 28)),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Text(project.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.w700)),
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: projColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+                        child: Text(project.category, style: TextStyle(color: projColor, fontSize: 11)),
+                      ),
+                    ]),
+                    Text(project.description, style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      _InfoChip(icon: Icons.task_alt_outlined, label: '태스크 ${project.tasks.length}개 ($doneTasks 완료)'),
+                      const SizedBox(width: 8),
+                      _InfoChip(icon: Icons.people_outline, label: '멤버 ${project.memberIds.length}명'),
+                      const SizedBox(width: 8),
+                      if (project.budget != null)
+                        _InfoChip(icon: Icons.account_balance_wallet_outlined,
+                            label: '예산 ${project.budget!.currency.symbol}${fmt.format(project.budget!.totalBudget)}'),
+                      const SizedBox(width: 8),
+                      _InfoChip(icon: Icons.trending_up, label: '진행률 ${project.completionRate.toStringAsFixed(0)}%'),
+                    ]),
+                  ])),
+                  // Actions
+                  // 프로젝트 편집 버튼
+                  IconButton(
+                    icon: const Icon(Icons.edit_rounded, color: AppTheme.textMuted, size: 18),
+                    tooltip: '프로젝트 편집',
+                    onPressed: () => showDialog(
+                      context: context,
+                      builder: (_) => ProjectEditDialog(project: project, provider: provider),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  // CSV 벌크 업로드 버튼
+                  OutlinedButton.icon(
+                    onPressed: () => showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => CsvTaskUploadDialog(
+                        projectId: project.id,
+                        provider: provider,
+                      ),
+                    ),
+                    icon: const Icon(Icons.upload_file, size: 16),
+                    label: const Text('CSV 업로드'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.accentBlue,
+                      side: const BorderSide(color: AppTheme.accentBlue),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () => _showAddTaskDialog(context, provider, project),
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('태스크 추가'),
+                    style: ElevatedButton.styleFrom(backgroundColor: projColor, foregroundColor: Colors.white),
+                  ),
+                ]),
+                const SizedBox(height: 16),
+                // Progress bar
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: project.completionRate / 100,
+                    backgroundColor: AppTheme.bgCardLight,
+                    valueColor: AlwaysStoppedAnimation<Color>(projColor),
+                    minHeight: 4,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TabBar(
+                  controller: _tab,
+                  labelColor: projColor,
+                  unselectedLabelColor: AppTheme.textMuted,
+                  indicatorColor: projColor,
+                  tabs: const [
+                    Tab(text: '태스크 보드'),
+                    Tab(text: '멤버별 태스크'),
+                    Tab(text: '예산 & 비용'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tab,
+              children: [
+                _TaskBoardTab(provider: provider, project: project),
+                _MemberTasksTab(provider: provider, project: project),
+                _BudgetTab(provider: provider, project: project),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddTaskDialog(BuildContext context, AppProvider provider, Project project) {
+    final titleCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    TaskPriority priority = TaskPriority.medium;
+    List<String> selectedAssignees = [];
+    DateTime? dueDate;
+
+    // Get team members
+    final team = provider.teams.firstWhere((t) => t.id == project.teamId, orElse: () => provider.teams.first);
+    final members = team.members.map((m) => m.user).toList();
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: AppTheme.bgCard,
+          title: const Text('태스크 추가', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w700)),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleCtrl,
+                    style: const TextStyle(color: AppTheme.textPrimary),
+                    decoration: const InputDecoration(labelText: '태스크 이름 *', hintText: '예: SNS 배너 디자인'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: descCtrl,
+                    style: const TextStyle(color: AppTheme.textPrimary),
+                    maxLines: 2,
+                    decoration: const InputDecoration(labelText: '설명'),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('우선순위', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    children: TaskPriority.values.map((p) {
+                      final c = _priorityColor(p);
+                      return ChoiceChip(
+                        label: Text(_priorityLabel(p), style: TextStyle(color: priority == p ? Colors.white : c, fontSize: 12)),
+                        selected: priority == p,
+                        selectedColor: c,
+                        backgroundColor: c.withValues(alpha: 0.15),
+                        onSelected: (_) => setState(() => priority = p),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('담당자', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: members.map((u) {
+                      final isSelected = selectedAssignees.contains(u.id);
+                      final col = u.avatarColor != null ? Color(int.parse('0xFF${u.avatarColor!.substring(1)}')) : AppTheme.mintPrimary;
+                      return GestureDetector(
+                        onTap: () => setState(() {
+                          if (isSelected) selectedAssignees.remove(u.id);
+                          else selectedAssignees.add(u.id);
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isSelected ? col.withValues(alpha: 0.25) : AppTheme.bgCardLight,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: isSelected ? col : Colors.transparent),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            CircleAvatar(radius: 10, backgroundColor: col.withValues(alpha: 0.3), child: Text(u.avatarInitials, style: TextStyle(color: col, fontSize: 8))),
+                            const SizedBox(width: 6),
+                            Text(u.name, style: TextStyle(color: isSelected ? col : AppTheme.textSecondary, fontSize: 12)),
+                          ]),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    const Text('마감일', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                    const SizedBox(width: 12),
+                    TextButton.icon(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: DateTime.now().add(const Duration(days: 7)),
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime(2026),
+                          builder: (_, child) => Theme(data: ThemeData.dark(), child: child!),
+                        );
+                        if (picked != null) setState(() => dueDate = picked);
+                      },
+                      icon: const Icon(Icons.calendar_today, size: 14),
+                      label: Text(dueDate != null ? DateFormat('yyyy.MM.dd').format(dueDate!) : '날짜 선택',
+                          style: const TextStyle(fontSize: 12)),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+            ElevatedButton(
+              onPressed: () {
+                if (titleCtrl.text.trim().isNotEmpty) {
+                  provider.createTask(
+                    projectId: project.id,
+                    title: titleCtrl.text.trim(),
+                    description: descCtrl.text.trim(),
+                    priority: priority,
+                    assigneeIds: selectedAssignees.isEmpty ? [provider.currentUser.id] : selectedAssignees,
+                    dueDate: dueDate,
+                  );
+                  Navigator.pop(ctx);
+                }
+              },
+              child: const Text('태스크 추가'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Color _priorityColor(TaskPriority p) {
+    switch (p) {
+      case TaskPriority.urgent: return AppTheme.error;
+      case TaskPriority.high: return AppTheme.warning;
+      case TaskPriority.medium: return AppTheme.info;
+      case TaskPriority.low: return AppTheme.textMuted;
+    }
+  }
+
+  static String _priorityLabel(TaskPriority p) {
+    switch (p) {
+      case TaskPriority.urgent: return '긴급';
+      case TaskPriority.high: return '높음';
+      case TaskPriority.medium: return '보통';
+      case TaskPriority.low: return '낮음';
+    }
+  }
+}
+
+// ── Task Board Tab ──────────────────────────────────────
+class _TaskBoardTab extends StatelessWidget {
+  final AppProvider provider;
+  final Project project;
+  const _TaskBoardTab({required this.provider, required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    final statuses = [TaskStatus.todo, TaskStatus.inProgress, TaskStatus.inReview, TaskStatus.done];
+    final labels = ['할 일', '진행 중', '검토 중', '완료'];
+    final colors = [AppTheme.textMuted, AppTheme.info, AppTheme.warning, AppTheme.success];
+
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: statuses.asMap().entries.map((e) {
+          final tasks = project.tasks.where((t) => t.status == e.value).toList();
+          return Expanded(
+            child: Container(
+              margin: const EdgeInsets.only(right: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(color: colors[e.key].withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                    child: Row(children: [
+                      Container(width: 8, height: 8, decoration: BoxDecoration(color: colors[e.key], shape: BoxShape.circle)),
+                      const SizedBox(width: 8),
+                      Text(labels[e.key], style: TextStyle(color: colors[e.key], fontSize: 12, fontWeight: FontWeight.w600)),
+                      const Spacer(),
+                      Text('${tasks.length}', style: TextStyle(color: colors[e.key], fontSize: 12)),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: tasks.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) => _TaskCard(task: tasks[i], provider: provider, project: project),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _TaskCard extends StatelessWidget {
+  final TaskDetail task;
+  final AppProvider provider;
+  final Project project;
+  const _TaskCard({required this.task, required this.provider, required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    final prColor = task.priority == TaskPriority.urgent ? AppTheme.error
+        : task.priority == TaskPriority.high ? AppTheme.warning
+        : task.priority == TaskPriority.medium ? AppTheme.info : AppTheme.textMuted;
+    final prLabel = task.priority == TaskPriority.urgent ? '긴급'
+        : task.priority == TaskPriority.high ? '높음'
+        : task.priority == TaskPriority.medium ? '보통' : '낮음';
+    final checkDone = task.checklist.where((c) => c.isDone).length;
+    final checkTotal = task.checklist.length;
+    final daysLeft = task.dueDate != null ? task.dueDate!.difference(DateTime.now()).inDays : null;
+
+    return InkWell(
+      onTap: () => provider.selectTask(task.id),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCard,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: task.isOverdue ? AppTheme.error.withValues(alpha: 0.4) : const Color(0xFF1E3040)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: prColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
+                child: Text(prLabel, style: TextStyle(color: prColor, fontSize: 10, fontWeight: FontWeight.w600)),
+              ),
+              const Spacer(),
+              if (task.isOverdue) const Icon(Icons.warning_amber_rounded, color: AppTheme.error, size: 14),
+            ]),
+            const SizedBox(height: 6),
+            Text(task.title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w500), maxLines: 2),
+            // ── 외부 ID / 테마 배지 (CSV 가져오기) ────────
+            if (task.externalId != null || task.theme != null) ...[
+              const SizedBox(height: 4),
+              Wrap(spacing: 4, runSpacing: 2, children: [
+                if (task.externalId != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentBlue.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(task.externalId!,
+                        style: const TextStyle(color: AppTheme.accentBlue, fontSize: 9, fontWeight: FontWeight.w700)),
+                  ),
+                if (task.theme != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentPurple.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(task.theme!,
+                        style: const TextStyle(color: AppTheme.accentPurple, fontSize: 9),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                if (task.target != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentGreen.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      '목표 ${task.target!.toStringAsFixed(task.target!.truncateToDouble() == task.target! ? 0 : 1)}'
+                      '${task.unit != null ? ' ${task.unit}' : ''}',
+                      style: const TextStyle(color: AppTheme.accentGreen, fontSize: 9),
+                    ),
+                  ),
+              ]),
+            ],
+            if (task.description.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(task.description, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+            const SizedBox(height: 8),
+            if (checkTotal > 0) ...[
+              Row(children: [
+                const Icon(Icons.checklist, color: AppTheme.textMuted, size: 12),
+                const SizedBox(width: 4),
+                Text('$checkDone/$checkTotal', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                const SizedBox(width: 8),
+                Expanded(child: ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: checkTotal > 0 ? checkDone / checkTotal : 0,
+                    backgroundColor: AppTheme.bgCardLight,
+                    valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.mintPrimary),
+                    minHeight: 3,
+                  ),
+                )),
+              ]),
+              const SizedBox(height: 6),
+            ],
+            Row(children: [
+              // Assignee avatars
+              ...task.assigneeIds.take(3).map((uid) {
+                final u = provider.getUserById(uid);
+                if (u == null) return const SizedBox();
+                final col = u.avatarColor != null ? Color(int.parse('0xFF${u.avatarColor!.substring(1)}')) : AppTheme.mintPrimary;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: CircleAvatar(radius: 10, backgroundColor: col.withValues(alpha: 0.3), child: Text(u.avatarInitials, style: TextStyle(color: col, fontSize: 8))),
+                );
+              }),
+              const Spacer(),
+              // 인라인 편집 버튼
+              GestureDetector(
+                onTap: () => showDialog(
+                  context: context,
+                  builder: (_) => TaskEditDialog(task: task, project: project, provider: provider),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.mintPrimary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Icon(Icons.edit_rounded, color: AppTheme.mintPrimary, size: 12),
+                ),
+              ),
+              const SizedBox(width: 6),
+              if (daysLeft != null)
+                Text(
+                  daysLeft < 0 ? 'D+${daysLeft.abs()}' : daysLeft == 0 ? 'D-Day' : 'D-$daysLeft',
+                  style: TextStyle(color: daysLeft < 0 ? AppTheme.error : daysLeft <= 3 ? AppTheme.warning : AppTheme.textMuted, fontSize: 10, fontWeight: FontWeight.w500),
+                ),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Member Tasks Tab ────────────────────────────────────
+class _MemberTasksTab extends StatelessWidget {
+  final AppProvider provider;
+  final Project project;
+  const _MemberTasksTab({required this.provider, required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    final memberIds = project.memberIds.toSet();
+    final allMembers = provider.allUsers.where((u) => memberIds.contains(u.id)).toList();
+
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: allMembers.map((u) {
+          final myTasks = project.tasks.where((t) => t.assigneeIds.contains(u.id)).toList();
+          final col = u.avatarColor != null ? Color(int.parse('0xFF${u.avatarColor!.substring(1)}')) : AppTheme.mintPrimary;
+          return Expanded(
+            child: Container(
+              margin: const EdgeInsets.only(right: 12),
+              decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Member header
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: col.withValues(alpha: 0.1),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                    ),
+                    child: Row(children: [
+                      CircleAvatar(radius: 16, backgroundColor: col.withValues(alpha: 0.3), child: Text(u.avatarInitials, style: TextStyle(color: col, fontSize: 11, fontWeight: FontWeight.w700))),
+                      const SizedBox(width: 10),
+                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(u.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                        Text('태스크 ${myTasks.length}개', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                      ]),
+                    ]),
+                  ),
+                  // Tasks
+                  Expanded(
+                    child: myTasks.isEmpty
+                        ? const Center(child: Text('태스크 없음', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)))
+                        : ListView.separated(
+                            padding: const EdgeInsets.all(10),
+                            itemCount: myTasks.length,
+                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                            itemBuilder: (_, i) => _TaskCard(task: myTasks[i], provider: provider, project: project),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ── Budget Tab ──────────────────────────────────────────
+class _BudgetTab extends StatelessWidget {
+  final AppProvider provider;
+  final Project project;
+  const _BudgetTab({required this.provider, required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = NumberFormat('#,###');
+    final budget = project.budget;
+    final executed = project.executedCostKrw;
+    final total = project.totalBudgetKrw;
+    final usage = project.budgetUsageRate;
+    final usageColor = usage >= 90 ? AppTheme.error : usage >= 70 ? AppTheme.warning : AppTheme.success;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Budget summary cards
+          Row(children: [
+            _BudgetCard(
+              title: '총 예산',
+              value: budget != null ? '${budget.currency.symbol}${fmt.format(budget.totalBudget)}' : '미설정',
+              subtitle: '₩${fmt.format(total)}',
+              color: AppTheme.mintPrimary,
+              icon: Icons.account_balance_wallet_outlined,
+            ),
+            const SizedBox(width: 16),
+            _BudgetCard(
+              title: '집행 금액',
+              value: '₩${fmt.format(executed)}',
+              subtitle: '${usage.toStringAsFixed(1)}% 사용',
+              color: usageColor,
+              icon: Icons.payment_outlined,
+            ),
+            const SizedBox(width: 16),
+            _BudgetCard(
+              title: '잔여 예산',
+              value: '₩${fmt.format(total - executed)}',
+              subtitle: total > 0 ? '${(100 - usage).clamp(0, 100).toStringAsFixed(1)}% 남음' : '-',
+              color: AppTheme.info,
+              icon: Icons.savings_outlined,
+            ),
+          ]),
+          const SizedBox(height: 20),
+          // Budget usage bar
+          if (budget != null) ...[
+            const Text('예산 사용률', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: (usage / 100).clamp(0, 1),
+                backgroundColor: AppTheme.bgCardLight,
+                valueColor: AlwaysStoppedAnimation<Color>(usageColor),
+                minHeight: 12,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(children: [
+              Text('₩${fmt.format(executed)} 집행', style: TextStyle(color: usageColor, fontSize: 12)),
+              const Spacer(),
+              Text('₩${fmt.format(total)} 총 예산', style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+            ]),
+            const SizedBox(height: 20),
+          ],
+          // Project cost entries
+          const Text('프로젝트 비용 내역', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          ...project.projectCosts.map((cost) => _CostRow(cost: cost)),
+          // Task budgets
+          if (project.tasks.any((t) => t.budget != null)) ...[
+            const SizedBox(height: 20),
+            const Text('태스크별 예산', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            ...project.tasks.where((t) => t.budget != null).map((t) {
+              final c = Color(int.parse('0xFF${project.colorHex.substring(1)}'));
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(10)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(t.title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Text('예산 ${t.budget!.currency.symbol}${fmt.format(t.budget!.totalBudget)}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                    const SizedBox(width: 16),
+                    Text('집행 ₩${fmt.format(t.executedAmountKrw)}', style: TextStyle(color: c, fontSize: 12)),
+                    const SizedBox(width: 16),
+                    Text('${t.costExecutionRate.toStringAsFixed(0)}%', style: TextStyle(color: t.costExecutionRate >= 90 ? AppTheme.error : AppTheme.success, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ]),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: (t.costExecutionRate / 100).clamp(0, 1),
+                      backgroundColor: AppTheme.bgCardLight,
+                      valueColor: AlwaysStoppedAnimation<Color>(t.costExecutionRate >= 90 ? AppTheme.error : c),
+                      minHeight: 5,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () => provider.selectTask(t.id),
+                    child: const Text('상세 보기 →', style: TextStyle(color: AppTheme.mintPrimary, fontSize: 12)),
+                  ),
+                ]),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BudgetCard extends StatelessWidget {
+  final String title, value, subtitle;
+  final Color color;
+  final IconData icon;
+  const _BudgetCard({required this.title, required this.value, required this.subtitle, required this.color, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.2))),
+        child: Row(children: [
+          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: color, size: 20)),
+          const SizedBox(width: 12),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+            Text(value, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(subtitle, style: TextStyle(color: color, fontSize: 12)),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+class _CostRow extends StatelessWidget {
+  final CostEntry cost;
+  const _CostRow({required this.cost});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(8)),
+      child: Row(children: [
+        Container(
+          width: 8, height: 8,
+          decoration: BoxDecoration(color: cost.isExecuted ? AppTheme.success : AppTheme.textMuted, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Text(cost.title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12))),
+        Text(DateFormat('MM.dd').format(cost.date), style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+        const SizedBox(width: 16),
+        Text('${cost.currency.symbol}${NumberFormat('#,###').format(cost.amount)}', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(width: 12),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: cost.isExecuted ? AppTheme.success.withValues(alpha: 0.15) : AppTheme.textMuted.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(cost.isExecuted ? '집행완료' : '예정', style: TextStyle(color: cost.isExecuted ? AppTheme.success : AppTheme.textMuted, fontSize: 10)),
+        ),
+      ]),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _InfoChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: AppTheme.bgCardLight, borderRadius: BorderRadius.circular(8)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: AppTheme.textMuted, size: 13),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+      ]),
+    );
+  }
+}
