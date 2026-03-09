@@ -311,6 +311,15 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// initialize() 타임아웃 시 강제로 unauthenticated 상태로 전환
+  void forceUnauthenticated() {
+    if (_status == AuthStatus.unknown) {
+      _status = AuthStatus.unauthenticated;
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   // ── Privacy Agreement ────────────────────────────────────
   Future<void> agreeToPrivacy() async {
     _privacyAgreed = true;

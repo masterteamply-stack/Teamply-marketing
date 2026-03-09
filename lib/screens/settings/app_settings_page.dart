@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/app_provider.dart';
 import '../../l10n/app_localizations.dart';
 import 'client_management_page.dart';
 import 'region_management_page.dart';
@@ -75,6 +76,21 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 trailing: const Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 20),
                 onTap: () => Navigator.push(context,
                     MaterialPageRoute(builder: (_) => const RegionManagementPage())),
+              ),
+              _settingsTile(
+                icon: Icons.group_remove_outlined,
+                iconColor: AppTheme.accentOrange,
+                title: '팀 관리',
+                subtitle: '팀 삭제, 프로젝트 일괄 삭제',
+                trailing: const Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 20),
+                onTap: () => _showTeamManagementSheet(context),
+              ),
+              _settingsTile(
+                icon: Icons.restore_rounded,
+                iconColor: AppTheme.accentRed,
+                title: '데이터 초기화',
+                subtitle: '모든 데이터를 디폴트 샘플 데이터로 리셋',
+                onTap: () => _showResetDataConfirm(context),
               ),
             ]),
             const SizedBox(height: 20),
@@ -465,6 +481,63 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   }
 
   // ── Actions ──────────────────────────────────────────────
+
+  void _showTeamManagementSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.bgCard,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const _TeamManagementSheet(),
+    );
+  }
+
+  void _showResetDataConfirm(BuildContext context) {
+    final app = context.read<AppProvider>();
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded, color: AppTheme.accentOrange, size: 22),
+          SizedBox(width: 8),
+          Text('데이터 초기화', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        ]),
+        content: const Text(
+          '모든 팀, 프로젝트, 태스크, KPI 데이터를\n디폴트 샘플 데이터로 초기화합니다.\n\n이 작업은 되돌릴 수 없습니다.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('데이터 초기화 중...'), duration: Duration(seconds: 2)),
+                );
+              }
+              await app.resetAllData();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('데이터가 초기화되었습니다.'),
+                    backgroundColor: AppTheme.accentGreen,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentOrange),
+            child: const Text('초기화', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _confirmSignOut(BuildContext context, AuthProvider auth) {
     showDialog(
       context: context,
@@ -481,6 +554,9 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
+              if (context.mounted) {
+                context.read<AppProvider>().clearUid();
+              }
               await auth.signOut();
               if (context.mounted) {
                 Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
@@ -586,4 +662,252 @@ class _PrivacyInfoDialog extends StatelessWidget {
           style: TextStyle(color: color ?? AppTheme.textSecondary, fontSize: 12))),
     ]),
   );
+}
+
+// ── Team Management BottomSheet ───────────────────────────────
+class _TeamManagementSheet extends StatefulWidget {
+  const _TeamManagementSheet();
+  @override
+  State<_TeamManagementSheet> createState() => _TeamManagementSheetState();
+}
+
+class _TeamManagementSheetState extends State<_TeamManagementSheet> {
+  final Set<String> _selectedProjects = {};
+  String? _expandedTeamId;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppProvider>();
+    final teams = app.teams;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.75,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 헤더
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+            child: Row(children: [
+              const Icon(Icons.group_remove_outlined, color: AppTheme.accentOrange, size: 20),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('팀 & 프로젝트 관리',
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+              ),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: AppTheme.textMuted)),
+            ]),
+          ),
+          const Divider(height: 1, color: AppTheme.border),
+          // 팀 목록
+          Flexible(
+            child: teams.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Text('팀이 없습니다', style: TextStyle(color: AppTheme.textMuted)),
+                    ),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: teams.length,
+                    itemBuilder: (ctx, i) {
+                      final team = teams[i];
+                      final projects = app.getProjectsForTeam(team.id);
+                      final isExpanded = _expandedTeamId == team.id;
+                      return Column(
+                        children: [
+                          // 팀 행
+                          Container(
+                            color: AppTheme.bgCard,
+                            child: ListTile(
+                              leading: Container(
+                                width: 36, height: 36,
+                                decoration: BoxDecoration(
+                                  color: Color(int.tryParse('0xFF${team.colorHex.replaceAll('#', '')}') ?? 0xFF00BFA5)
+                                      .withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                child: Center(
+                                  child: Text(team.iconEmoji, style: const TextStyle(fontSize: 18)),
+                                ),
+                              ),
+                              title: Text(team.name,
+                                  style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
+                              subtitle: Text('프로젝트 ${projects.length}개',
+                                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                // 프로젝트 보기 토글
+                                if (projects.isNotEmpty)
+                                  IconButton(
+                                    icon: Icon(isExpanded ? Icons.expand_less : Icons.expand_more,
+                                        color: AppTheme.textMuted, size: 20),
+                                    onPressed: () => setState(() {
+                                      _expandedTeamId = isExpanded ? null : team.id;
+                                      _selectedProjects.clear();
+                                    }),
+                                  ),
+                                // 팀 삭제 버튼
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: AppTheme.accentRed, size: 20),
+                                  tooltip: '팀 삭제',
+                                  onPressed: () => _confirmDeleteTeam(context, app, team.id, team.name),
+                                ),
+                              ]),
+                            ),
+                          ),
+                          // 프로젝트 목록 (확장 시)
+                          if (isExpanded && projects.isNotEmpty) ...[
+                            Container(
+                              color: AppTheme.bgDark,
+                              child: Column(children: [
+                                // 일괄 삭제 툴바
+                                if (_selectedProjects.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                    child: Row(children: [
+                                      Text('${_selectedProjects.length}개 선택됨',
+                                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                                      const Spacer(),
+                                      TextButton.icon(
+                                        onPressed: () => _confirmBulkDelete(context, app),
+                                        icon: const Icon(Icons.delete_sweep_outlined, size: 16, color: AppTheme.accentRed),
+                                        label: const Text('일괄 삭제', style: TextStyle(color: AppTheme.accentRed, fontSize: 12)),
+                                      ),
+                                    ]),
+                                  ),
+                                ...projects.map((proj) {
+                                  final isSelected = _selectedProjects.contains(proj.id);
+                                  return CheckboxListTile(
+                                    value: isSelected,
+                                    onChanged: (v) => setState(() {
+                                      if (v == true) _selectedProjects.add(proj.id);
+                                      else _selectedProjects.remove(proj.id);
+                                    }),
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.only(left: 24, right: 16),
+                                    checkColor: Colors.white,
+                                    activeColor: AppTheme.mintPrimary,
+                                    title: Row(children: [
+                                      Text(proj.iconEmoji, style: const TextStyle(fontSize: 14)),
+                                      const SizedBox(width: 8),
+                                      Expanded(child: Text(proj.name,
+                                          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13))),
+                                    ]),
+                                    subtitle: Text('태스크 ${proj.tasks.length}개',
+                                        style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                                    secondary: IconButton(
+                                      icon: const Icon(Icons.delete_outline, color: AppTheme.accentRed, size: 18),
+                                      tooltip: '삭제',
+                                      onPressed: () => _confirmDeleteProject(context, app, proj.id, proj.name),
+                                    ),
+                                  );
+                                }),
+                              ]),
+                            ),
+                          ],
+                          const Divider(height: 1, color: AppTheme.border),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteTeam(BuildContext context, AppProvider app, String teamId, String teamName) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text('팀 삭제', style: TextStyle(color: AppTheme.accentRed)),
+        content: Text('"$teamName" 팀과 팀에 속한 모든 프로젝트를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.',
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await app.deleteTeam(teamId);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('팀이 삭제되었습니다.'), backgroundColor: AppTheme.accentRed),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRed),
+            child: const Text('삭제', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteProject(BuildContext context, AppProvider app, String projectId, String projectName) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text('프로젝트 삭제', style: TextStyle(color: AppTheme.accentRed)),
+        content: Text('"$projectName" 프로젝트를 삭제하시겠습니까?',
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await app.deleteProject(projectId);
+              setState(() { _selectedProjects.remove(projectId); });
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('프로젝트가 삭제되었습니다.'), backgroundColor: AppTheme.accentRed),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRed),
+            child: const Text('삭제', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmBulkDelete(BuildContext context, AppProvider app) {
+    final count = _selectedProjects.length;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text('프로젝트 일괄 삭제', style: TextStyle(color: AppTheme.accentRed)),
+        content: Text('선택한 $count개의 프로젝트를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.',
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final ids = List<String>.from(_selectedProjects);
+              await app.deleteProjectsBulk(ids);
+              setState(() { _selectedProjects.clear(); });
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$count개 프로젝트가 삭제되었습니다.'),
+                    backgroundColor: AppTheme.accentRed,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRed),
+            child: const Text('일괄 삭제', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -349,6 +349,29 @@ class AppUser {
   // 표시 이름: 닉네임 있으면 닉네임 우선
   String get displayName => nickname?.isNotEmpty == true ? nickname! : name;
 
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'nickname': nickname,
+    'email': email,
+    'avatarInitials': avatarInitials,
+    'avatarColor': avatarColor,
+    'jobTitle': jobTitle.name,
+    'department': department,
+  };
+
+  factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    nickname: j['nickname'] as String?,
+    email: j['email'] as String? ?? '',
+    avatarInitials: j['avatarInitials'] as String? ?? '',
+    avatarColor: j['avatarColor'] as String?,
+    jobTitle: JobTitle.values.firstWhere(
+        (e) => e.name == j['jobTitle'], orElse: () => JobTitle.member),
+    department: j['department'] as String?,
+  );
+
   AppUser copyWith({
     String? name, String? nickname, String? email,
     String? avatarInitials, String? avatarColor,
@@ -414,6 +437,48 @@ class Team {
 
   TeamMember? getMember(String userId) =>
       members.where((m) => m.user.id == userId).firstOrNull;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'description': description,
+    'colorHex': colorHex,
+    'iconEmoji': iconEmoji,
+    'members': members.map((m) => {
+      'id': m.id,
+      'userId': m.user.id,
+      'role': m.role.name,
+      'joinedAt': m.joinedAt.toIso8601String(),
+      'isActive': m.isActive,
+      'user': m.user.toJson(),
+    }).toList(),
+    'projectIds': projectIds,
+    'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory Team.fromJson(Map<String, dynamic> j) {
+    final members = (j['members'] as List<dynamic>? ?? []).map((m) {
+      final mMap = m as Map<String, dynamic>;
+      return TeamMember(
+        id: mMap['id'] as String,
+        user: AppUser.fromJson(mMap['user'] as Map<String, dynamic>),
+        role: MemberRole.values.firstWhere(
+            (e) => e.name == mMap['role'], orElse: () => MemberRole.viewer),
+        joinedAt: DateTime.parse(mMap['joinedAt'] as String),
+        isActive: mMap['isActive'] as bool? ?? true,
+      );
+    }).toList();
+    return Team(
+      id: j['id'] as String,
+      name: j['name'] as String? ?? '',
+      description: j['description'] as String? ?? '',
+      colorHex: j['colorHex'] as String? ?? '#00BFA5',
+      iconEmoji: j['iconEmoji'] as String? ?? '👥',
+      members: members,
+      projectIds: List<String>.from(j['projectIds'] as List? ?? []),
+      createdAt: DateTime.parse(j['createdAt'] as String),
+    );
+  }
 }
 
 // ════════════════════════════════════════════════════════
@@ -476,6 +541,31 @@ class ChecklistItem {
     currency: currency ?? this.currency,
     costNote: costNote ?? this.costNote,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'title': title, 'isDone': isDone,
+    'assigneeId': assigneeId,
+    'dueDate': dueDate?.toIso8601String(),
+    'clientId': clientId, 'region': region, 'country': country,
+    'allocatedBudget': allocatedBudget, 'executedAmount': executedAmount,
+    'currency': currency?.name, 'costNote': costNote,
+  };
+
+  factory ChecklistItem.fromJson(Map<String, dynamic> j) => ChecklistItem(
+    id: j['id'] as String,
+    title: j['title'] as String? ?? '',
+    isDone: j['isDone'] as bool? ?? false,
+    assigneeId: j['assigneeId'] as String?,
+    dueDate: j['dueDate'] != null ? DateTime.parse(j['dueDate'] as String) : null,
+    clientId: j['clientId'] as String?,
+    region: j['region'] as String?,
+    country: j['country'] as String?,
+    allocatedBudget: (j['allocatedBudget'] as num?)?.toDouble(),
+    executedAmount: (j['executedAmount'] as num?)?.toDouble(),
+    currency: j['currency'] != null ? CurrencyCode.values.firstWhere(
+        (e) => e.name == j['currency'], orElse: () => CurrencyCode.krw) : null,
+    costNote: j['costNote'] as String?,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -497,6 +587,22 @@ class ScheduleItem {
     this.isDone = false,
     this.color,
   });
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'title': title,
+    'startDate': startDate.toIso8601String(),
+    'endDate': endDate.toIso8601String(),
+    'isDone': isDone, 'color': color,
+  };
+
+  factory ScheduleItem.fromJson(Map<String, dynamic> j) => ScheduleItem(
+    id: j['id'] as String,
+    title: j['title'] as String? ?? '',
+    startDate: j['startDate'] != null ? DateTime.parse(j['startDate'] as String) : DateTime.now(),
+    endDate: j['endDate'] != null ? DateTime.parse(j['endDate'] as String) : DateTime.now(),
+    isDone: j['isDone'] as bool? ?? false,
+    color: j['color'] as String?,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -567,12 +673,47 @@ class CostEntry {
     clientId: clientId ?? this.clientId,
     assignedTo: assignedTo ?? this.assignedTo,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'amount': amount,
+    'currency': currency.name,
+    'date': date.toIso8601String(),
+    'category': category,
+    'note': note,
+    'isExecuted': isExecuted,
+    'executionRate': executionRate,
+    'executionRateNote': executionRateNote,
+    'region': region,
+    'country': country,
+    'clientId': clientId,
+    'assignedTo': assignedTo,
+  };
+
+  factory CostEntry.fromJson(Map<String, dynamic> j) => CostEntry(
+    id: j['id'] as String,
+    title: j['title'] as String? ?? '',
+    amount: (j['amount'] as num?)?.toDouble() ?? 0,
+    currency: CurrencyCode.values.firstWhere(
+        (e) => e.name == j['currency'], orElse: () => CurrencyCode.krw),
+    date: j['date'] != null ? DateTime.parse(j['date'] as String) : DateTime.now(),
+    category: j['category'] as String? ?? '기타',
+    note: j['note'] as String?,
+    isExecuted: j['isExecuted'] as bool? ?? false,
+    executionRate: (j['executionRate'] as num?)?.toDouble(),
+    executionRateNote: j['executionRateNote'] as String?,
+    region: j['region'] as String?,
+    country: j['country'] as String?,
+    clientId: j['clientId'] as String?,
+    assignedTo: j['assignedTo'] as String?,
+  );
 }
 
 class BudgetConfig {
   double totalBudget;
   CurrencyCode currency;
-  double exchangeRateToKrw;   // 경영환율 (예산 편성 시 기준 환율)
+  double exchangeRateToKrw;
 
   BudgetConfig({
     required this.totalBudget,
@@ -582,9 +723,21 @@ class BudgetConfig {
 
   double get totalInKrw => totalBudget * exchangeRateToKrw;
 
-  /// USD 환산 편의 getter (USD 경영환율 별도 제공 필요)
   double totalInUsd(double usdRateToKrw) =>
       usdRateToKrw > 0 ? totalInKrw / usdRateToKrw : 0;
+
+  Map<String, dynamic> toJson() => {
+    'totalBudget': totalBudget,
+    'currency': currency.name,
+    'exchangeRateToKrw': exchangeRateToKrw,
+  };
+
+  factory BudgetConfig.fromJson(Map<String, dynamic> j) => BudgetConfig(
+    totalBudget: (j['totalBudget'] as num?)?.toDouble() ?? 0,
+    currency: CurrencyCode.values.firstWhere(
+        (e) => e.name == j['currency'], orElse: () => CurrencyCode.krw),
+    exchangeRateToKrw: (j['exchangeRateToKrw'] as num?)?.toDouble() ?? 1,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -717,6 +870,80 @@ class TaskDetail {
     if (checklistTotalAllocated <= 0) return 0;
     return (checklistTotalExecuted / checklistTotalAllocated * 100).clamp(0, 200);
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'title': title, 'description': description,
+    'status': status.name, 'priority': priority.name,
+    'createdBy': createdBy, 'assigneeIds': assigneeIds,
+    'mentionedUserIds': mentionedUserIds,
+    'checklist': checklist.map((c) => c.toJson()).toList(),
+    'schedules': schedules.map((s) => s.toJson()).toList(),
+    'costEntries': costEntries.map((c) => c.toJson()).toList(),
+    'budget': budget?.toJson(),
+    'tags': tags,
+    'startDate': startDate?.toIso8601String(),
+    'dueDate': dueDate?.toIso8601String(),
+    'kpiId': kpiId, 'pillar': pillar?.name,
+    'kpiTargets': kpiTargets.map((k) => k.toJson()).toList(),
+    'comments': comments.map((c) => c.toJson()).toList(),
+    'attachments': attachments.map((a) => a.toJson()).toList(),
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'externalId': externalId, 'year': year,
+    'target': target, 'unit': unit, 'theme': theme, 'ownerName': ownerName,
+    'defaultClientId': defaultClientId, 'defaultRegion': defaultRegion,
+    'defaultCountry': defaultCountry,
+    'taskAllocatedBudget': taskAllocatedBudget,
+    'taskBudgetCurrency': taskBudgetCurrency?.name,
+  };
+
+  factory TaskDetail.fromJson(Map<String, dynamic> j) => TaskDetail(
+    id: j['id'] as String,
+    title: j['title'] as String? ?? '',
+    description: j['description'] as String? ?? '',
+    status: TaskStatus.values.firstWhere(
+        (e) => e.name == j['status'], orElse: () => TaskStatus.todo),
+    priority: TaskPriority.values.firstWhere(
+        (e) => e.name == j['priority'], orElse: () => TaskPriority.medium),
+    createdBy: j['createdBy'] as String? ?? '',
+    assigneeIds: List<String>.from(j['assigneeIds'] as List? ?? []),
+    mentionedUserIds: List<String>.from(j['mentionedUserIds'] as List? ?? []),
+    checklist: (j['checklist'] as List<dynamic>? ?? [])
+        .map((c) => ChecklistItem.fromJson(c as Map<String, dynamic>)).toList(),
+    schedules: (j['schedules'] as List<dynamic>? ?? [])
+        .map((s) => ScheduleItem.fromJson(s as Map<String, dynamic>)).toList(),
+    costEntries: (j['costEntries'] as List<dynamic>? ?? [])
+        .map((c) => CostEntry.fromJson(c as Map<String, dynamic>)).toList(),
+    budget: j['budget'] != null
+        ? BudgetConfig.fromJson(j['budget'] as Map<String, dynamic>) : null,
+    tags: List<String>.from(j['tags'] as List? ?? []),
+    startDate: j['startDate'] != null ? DateTime.parse(j['startDate'] as String) : null,
+    dueDate: j['dueDate'] != null ? DateTime.parse(j['dueDate'] as String) : null,
+    kpiId: j['kpiId'] as String?,
+    pillar: j['pillar'] != null ? StrategyPillar.values.firstWhere(
+        (e) => e.name == j['pillar'], orElse: () => StrategyPillar.growth) : null,
+    kpiTargets: (j['kpiTargets'] as List<dynamic>? ?? [])
+        .map((k) => TaskKpiTarget.fromJson(k as Map<String, dynamic>)).toList(),
+    comments: (j['comments'] as List<dynamic>? ?? [])
+        .map((c) => TaskComment.fromJson(c as Map<String, dynamic>)).toList(),
+    attachments: (j['attachments'] as List<dynamic>? ?? [])
+        .map((a) => TaskAttachment.fromJson(a as Map<String, dynamic>)).toList(),
+    createdAt: j['createdAt'] != null ? DateTime.parse(j['createdAt'] as String) : DateTime.now(),
+    updatedAt: j['updatedAt'] != null ? DateTime.parse(j['updatedAt'] as String) : DateTime.now(),
+    externalId: j['externalId'] as String?,
+    year: j['year'] as int?,
+    target: (j['target'] as num?)?.toDouble(),
+    unit: j['unit'] as String?,
+    theme: j['theme'] as String?,
+    ownerName: j['ownerName'] as String?,
+    defaultClientId: j['defaultClientId'] as String?,
+    defaultRegion: j['defaultRegion'] as String?,
+    defaultCountry: j['defaultCountry'] as String?,
+    taskAllocatedBudget: (j['taskAllocatedBudget'] as num?)?.toDouble(),
+    taskBudgetCurrency: j['taskBudgetCurrency'] != null
+        ? CurrencyCode.values.firstWhere(
+            (e) => e.name == j['taskBudgetCurrency'], orElse: () => CurrencyCode.krw) : null,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -768,6 +995,49 @@ class Project {
       tasks.fold(0.0, (s, t) => s + t.executedAmountKrw);
   double get budgetUsageRate =>
       totalBudgetKrw > 0 ? (executedCostKrw / totalBudgetKrw * 100).clamp(0, 200) : 0;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'description': description,
+    'category': category,
+    'status': status.name,
+    'teamId': teamId,
+    'ownerId': ownerId,
+    'memberIds': memberIds,
+    'tasks': tasks.map((t) => t.toJson()).toList(),
+    'budget': budget?.toJson(),
+    'projectCosts': projectCosts.map((c) => c.toJson()).toList(),
+    'colorHex': colorHex,
+    'iconEmoji': iconEmoji,
+    'createdAt': createdAt.toIso8601String(),
+    'dueDate': dueDate?.toIso8601String(),
+  };
+
+  factory Project.fromJson(Map<String, dynamic> j) => Project(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    description: j['description'] as String? ?? '',
+    category: j['category'] as String? ?? '',
+    status: ProjectStatus.values.firstWhere(
+        (e) => e.name == j['status'], orElse: () => ProjectStatus.active),
+    teamId: j['teamId'] as String? ?? '',
+    ownerId: j['ownerId'] as String? ?? '',
+    memberIds: List<String>.from(j['memberIds'] as List? ?? []),
+    tasks: (j['tasks'] as List<dynamic>? ?? [])
+        .map((t) => TaskDetail.fromJson(t as Map<String, dynamic>))
+        .toList(),
+    budget: j['budget'] != null
+        ? BudgetConfig.fromJson(j['budget'] as Map<String, dynamic>)
+        : null,
+    projectCosts: (j['projectCosts'] as List<dynamic>? ?? [])
+        .map((c) => CostEntry.fromJson(c as Map<String, dynamic>))
+        .toList(),
+    colorHex: j['colorHex'] as String? ?? '#00BFA5',
+    iconEmoji: j['iconEmoji'] as String? ?? '📁',
+    createdAt: DateTime.parse(j['createdAt'] as String),
+    dueDate: j['dueDate'] != null ? DateTime.parse(j['dueDate'] as String) : null,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -829,6 +1099,45 @@ class KpiModel {
     projectId: projectId ?? this.projectId,
     pillar: pillar ?? this.pillar,
     pillarDescription: pillarDescription ?? this.pillarDescription,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'category': category,
+    'target': target,
+    'current': current,
+    'unit': unit,
+    'period': period,
+    'assignedTo': assignedTo,
+    'isTeamKpi': isTeamKpi,
+    'dueDate': dueDate.toIso8601String(),
+    'teamId': teamId,
+    'projectId': projectId,
+    'pillar': pillar?.name,
+    'pillarDescription': pillarDescription,
+  };
+
+  factory KpiModel.fromJson(Map<String, dynamic> j) => KpiModel(
+    id: j['id'] as String,
+    title: j['title'] as String? ?? '',
+    category: j['category'] as String? ?? '',
+    target: (j['target'] as num?)?.toDouble() ?? 0,
+    current: (j['current'] as num?)?.toDouble() ?? 0,
+    unit: j['unit'] as String? ?? '',
+    period: j['period'] as String? ?? '',
+    assignedTo: j['assignedTo'] as String?,
+    isTeamKpi: j['isTeamKpi'] as bool? ?? false,
+    dueDate: j['dueDate'] != null
+        ? DateTime.parse(j['dueDate'] as String)
+        : DateTime.now(),
+    teamId: j['teamId'] as String?,
+    projectId: j['projectId'] as String?,
+    pillar: j['pillar'] != null
+        ? StrategyPillar.values.firstWhere(
+            (e) => e.name == j['pillar'], orElse: () => StrategyPillar.growth)
+        : null,
+    pillarDescription: j['pillarDescription'] as String?,
   );
 }
 
@@ -893,6 +1202,25 @@ class TaskComment {
     required this.updatedAt,
     this.isEdited = false,
   });
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'taskId': taskId, 'authorId': authorId, 'content': content,
+    'mentionedUserIds': mentionedUserIds,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'isEdited': isEdited,
+  };
+
+  factory TaskComment.fromJson(Map<String, dynamic> j) => TaskComment(
+    id: j['id'] as String,
+    taskId: j['taskId'] as String? ?? '',
+    authorId: j['authorId'] as String? ?? '',
+    content: j['content'] as String? ?? '',
+    mentionedUserIds: List<String>.from(j['mentionedUserIds'] as List? ?? []),
+    createdAt: j['createdAt'] != null ? DateTime.parse(j['createdAt'] as String) : DateTime.now(),
+    updatedAt: j['updatedAt'] != null ? DateTime.parse(j['updatedAt'] as String) : DateTime.now(),
+    isEdited: j['isEdited'] as bool? ?? false,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -1062,6 +1390,30 @@ class TaskAttachment {
     if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)}KB';
     return '${(b / 1024 / 1024).toStringAsFixed(1)}MB';
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'url': url,
+    'fileType': fileType.name, 'sourceType': sourceType.name,
+    'description': description, 'checklistItemId': checklistItemId,
+    'uploadedBy': uploadedBy,
+    'createdAt': createdAt.toIso8601String(),
+    'fileSizeBytes': fileSizeBytes,
+  };
+
+  factory TaskAttachment.fromJson(Map<String, dynamic> j) => TaskAttachment(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    url: j['url'] as String? ?? '',
+    fileType: AttachmentFileType.values.firstWhere(
+        (e) => e.name == j['fileType'], orElse: () => AttachmentFileType.unknown),
+    sourceType: AttachmentSourceType.values.firstWhere(
+        (e) => e.name == j['sourceType'], orElse: () => AttachmentSourceType.link),
+    description: j['description'] as String?,
+    checklistItemId: j['checklistItemId'] as String?,
+    uploadedBy: j['uploadedBy'] as String? ?? '',
+    createdAt: j['createdAt'] != null ? DateTime.parse(j['createdAt'] as String) : DateTime.now(),
+    fileSizeBytes: j['fileSizeBytes'] as int?,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -1158,6 +1510,24 @@ class TaskKpiTarget {
     this.pillar,
     required this.monthlyTargets,
   });
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'taskId': taskId, 'kpiName': kpiName, 'unit': unit,
+    'linkedKpiId': linkedKpiId, 'pillar': pillar?.name,
+    'monthlyTargets': monthlyTargets.map((m) => m.toJson()).toList(),
+  };
+
+  factory TaskKpiTarget.fromJson(Map<String, dynamic> j) => TaskKpiTarget(
+    id: j['id'] as String,
+    taskId: j['taskId'] as String? ?? '',
+    kpiName: j['kpiName'] as String? ?? '',
+    unit: j['unit'] as String? ?? '',
+    linkedKpiId: j['linkedKpiId'] as String?,
+    pillar: j['pillar'] != null ? StrategyPillar.values.firstWhere(
+        (e) => e.name == j['pillar'], orElse: () => StrategyPillar.growth) : null,
+    monthlyTargets: (j['monthlyTargets'] as List<dynamic>? ?? [])
+        .map((m) => MonthlyKpiEntry.fromJson(m as Map<String, dynamic>)).toList(),
+  );
 }
 
 class MonthlyKpiEntry {
@@ -1178,6 +1548,19 @@ class MonthlyKpiEntry {
   double get achievementRate => target > 0 ? (actual / target * 100).clamp(0, 200) : 0;
   double get gap => actual - target;
   bool get isOnTrack => achievementRate >= 80;
+
+  Map<String, dynamic> toJson() => {
+    'month': month, 'monthLabel': monthLabel,
+    'target': target, 'actual': actual, 'note': note,
+  };
+
+  factory MonthlyKpiEntry.fromJson(Map<String, dynamic> j) => MonthlyKpiEntry(
+    month: j['month'] as String? ?? '',
+    monthLabel: j['monthLabel'] as String? ?? '',
+    target: (j['target'] as num?)?.toDouble() ?? 0,
+    actual: (j['actual'] as num?)?.toDouble() ?? 0,
+    note: j['note'] as String?,
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -1214,6 +1597,30 @@ class CampaignModel {
   double get cpa => conversions > 0 ? (spent / conversions) : 0;
   double get roas => spent > 0 ? (revenue / spent) : 0;
   double get budgetUsedPercent => budget > 0 ? (spent / budget * 100).clamp(0, 100) : 0;
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'type': type, 'status': status, 'channel': channel,
+    'budget': budget, 'spent': spent, 'revenue': revenue,
+    'impressions': impressions, 'clicks': clicks, 'conversions': conversions,
+    'startDate': startDate.toIso8601String(),
+    'endDate': endDate.toIso8601String(),
+  };
+
+  factory CampaignModel.fromJson(Map<String, dynamic> j) => CampaignModel(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    type: j['type'] as String? ?? '',
+    status: j['status'] as String? ?? '',
+    channel: j['channel'] as String? ?? '',
+    budget: (j['budget'] as num?)?.toDouble() ?? 0,
+    spent: (j['spent'] as num?)?.toDouble() ?? 0,
+    revenue: (j['revenue'] as num?)?.toDouble() ?? 0,
+    impressions: (j['impressions'] as num?)?.toDouble() ?? 0,
+    clicks: (j['clicks'] as num?)?.toDouble() ?? 0,
+    conversions: (j['conversions'] as num?)?.toDouble() ?? 0,
+    startDate: j['startDate'] != null ? DateTime.parse(j['startDate'] as String) : DateTime.now(),
+    endDate: j['endDate'] != null ? DateTime.parse(j['endDate'] as String) : DateTime.now(),
+  );
 }
 
 // ════════════════════════════════════════════════════════
@@ -1249,6 +1656,22 @@ class MarketingRegion {
     colorHex: colorHex ?? this.colorHex,
     icon: icon ?? this.icon,
     regionCode: regionCode ?? this.regionCode,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'description': description,
+    'countries': countries, 'colorHex': colorHex,
+    'icon': icon, 'regionCode': regionCode,
+  };
+
+  factory MarketingRegion.fromJson(Map<String, dynamic> j) => MarketingRegion(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    description: j['description'] as String?,
+    countries: List<String>.from(j['countries'] as List? ?? []),
+    colorHex: j['colorHex'] as String? ?? '#00C9A7',
+    icon: j['icon'] as String? ?? '🌍',
+    regionCode: j['regionCode'] as String?,
   );
 }
 
@@ -1290,6 +1713,33 @@ class ClientAccount {
   });
 
   double get roi => adSpend > 0 ? ((revenue - adSpend) / adSpend * 100) : 0;
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'buyerCode': buyerCode,
+    'country': country, 'region': region, 'industry': industry,
+    'contactName': contactName, 'contactEmail': contactEmail,
+    'contactPhone': contactPhone, 'note': note,
+    'isActive': isActive, 'revenue': revenue, 'adSpend': adSpend,
+    'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory ClientAccount.fromJson(Map<String, dynamic> j) => ClientAccount(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    buyerCode: j['buyerCode'] as String?,
+    country: j['country'] as String?,
+    region: j['region'] as String?,
+    industry: j['industry'] as String?,
+    contactName: j['contactName'] as String?,
+    contactEmail: j['contactEmail'] as String?,
+    contactPhone: j['contactPhone'] as String?,
+    note: j['note'] as String?,
+    isActive: j['isActive'] as bool? ?? true,
+    revenue: (j['revenue'] as num?)?.toDouble() ?? 0,
+    adSpend: (j['adSpend'] as num?)?.toDouble() ?? 0,
+    createdAt: j['createdAt'] != null
+        ? DateTime.parse(j['createdAt'] as String) : DateTime.now(),
+  );
 
   ClientAccount copyWith({
     String? name, String? buyerCode, String? country, String? region,

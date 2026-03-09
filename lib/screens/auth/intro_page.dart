@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
 import '../../l10n/app_localizations.dart';
-import 'login_page.dart';
 
 class IntroPage extends StatefulWidget {
   const IntroPage({super.key});
@@ -17,8 +16,6 @@ class _IntroPageState extends State<IntroPage> with TickerProviderStateMixin {
 
   late AnimationController _fadeCtrl;
   late AnimationController _slideCtrl;
-  late Animation<double>    _fadeAnim;
-  late Animation<Offset>    _slideAnim;
 
   final _pages = const [
     _IntroData(
@@ -43,9 +40,6 @@ class _IntroPageState extends State<IntroPage> with TickerProviderStateMixin {
     super.initState();
     _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _slideCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
-    _fadeAnim  = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeIn);
-    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
     _fadeCtrl.forward();
     _slideCtrl.forward();
   }
@@ -70,21 +64,14 @@ class _IntroPageState extends State<IntroPage> with TickerProviderStateMixin {
   }
 
   void _finishIntro() {
+    // completeIntro() 호출만 하면 _AppRouter가 자동으로 LoginPage로 전환
+    // Navigator.pushReplacement를 사용하면 라우터 충돌 발생
     context.read<AuthProvider>().completeIntro();
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const LoginPage(),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
-        transitionDuration: const Duration(milliseconds: 400),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n  = AppLocalizations.of(context);
-    final size  = MediaQuery.of(context).size;
     final isLastPage = _currentPage == _pages.length - 1;
 
     return Scaffold(

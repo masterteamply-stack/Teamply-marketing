@@ -1,7 +1,120 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/firestore_service.dart';
 
 class AppProvider extends ChangeNotifier {
+  // ─── Firebase UID (로그인 후 설정) ────────────────────────
+  String? _uid;
+  bool _firebaseLoaded = false;
+  final FirestoreService _fs = FirestoreService();
+
+  // 실시간 스트림 구독 취소
+  StreamSubscription<List<Team>>? _teamsSub;
+  StreamSubscription<List<Project>>? _projectsSub;
+
+  /// 로그인 후 uid를 설정하고 Firebase에서 데이터 로드
+  Future<void> setUidAndLoad(String uid) async {
+    _uid = uid;
+    await _loadFromFirebase(uid);
+    _startRealTimeSync(uid);
+  }
+
+  void _startRealTimeSync(String uid) {
+    _teamsSub?.cancel();
+    _projectsSub?.cancel();
+
+    // 팀 실시간 동기화
+    _teamsSub = _fs.watchTeams(uid).listen((teams) {
+      if (teams.isNotEmpty) {
+        _teams.clear();
+        _teams.addAll(teams);
+        notifyListeners();
+      }
+    }, onError: (e) {
+      if (kDebugMode) debugPrint('watchTeams error: $e');
+    });
+
+    // 프로젝트 실시간 동기화
+    _projectsSub = _fs.watchProjects(uid).listen((projects) {
+      if (projects.isNotEmpty) {
+        _projectStore.clear();
+        _projectStore.addAll(projects);
+        notifyListeners();
+      }
+    }, onError: (e) {
+      if (kDebugMode) debugPrint('watchProjects error: $e');
+    });
+  }
+
+  void clearUid() {
+    _teamsSub?.cancel();
+    _projectsSub?.cancel();
+    _teamsSub = null;
+    _projectsSub = null;
+    _uid = null;
+    _firebaseLoaded = false;
+  }
+
+  Future<void> _loadFromFirebase(String uid) async {
+    // Firebase 사용 불가 시 로컬 샘플 데이터 유지
+    if (!_fs.isAvailable) {
+      if (kDebugMode) debugPrint('[AppProvider] Firebase offline → using local sample data');
+      _firebaseLoaded = false;
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final isNew = await _fs.isNewUser(uid).timeout(const Duration(seconds: 10));
+      if (isNew) {
+        // 첫 가입: 샘플 데이터를 Firebase에 저장
+        await _saveAllToFirebase(uid);
+        if (kDebugMode) debugPrint('[AppProvider] New user → saved sample data to Firebase');
+      } else {
+        // 기존 유저: Firebase에서 데이터 로드
+        final bundle = await _fs.loadAllUserData(uid).timeout(const Duration(seconds: 10));
+        if (!bundle.isEmpty) {
+          _teams.clear();       _teams.addAll(bundle.teams);
+          _projectStore.clear(); _projectStore.addAll(bundle.projects);
+          _kpis.clear();        _kpis.addAll(bundle.kpis);
+          _campaigns.clear();   _campaigns.addAll(bundle.campaigns);
+          _regions.clear();     _regions.addAll(bundle.regions);
+          _clients.clear();     _clients.addAll(bundle.clients);
+          if (bundle.members.isNotEmpty) {
+            _allUsers.clear(); _allUsers.addAll(bundle.members);
+          }
+          if (kDebugMode) debugPrint('[AppProvider] Loaded existing user data from Firebase');
+        }
+      }
+      _firebaseLoaded = true;
+      notifyListeners();
+    } catch (e) {
+      // Firebase 실패해도 로컬 샘플 데이터로 계속 동작
+      if (kDebugMode) debugPrint('[AppProvider] Firebase load error → using local data: $e');
+      _firebaseLoaded = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _saveAllToFirebase(String uid) async {
+    final bundle = UserDataBundle(
+      teams: _teams, projects: _projectStore, kpis: _kpis,
+      campaigns: _campaigns, regions: _regions, clients: _clients,
+      members: _allUsers,
+    );
+    await _fs.saveAllUserData(uid, bundle);
+  }
+
+  @override
+  void dispose() {
+    _teamsSub?.cancel();
+    _projectsSub?.cancel();
+    super.dispose();
+  }
+
+  bool get isFirebaseLoaded => _firebaseLoaded;
+
   // ─── Current User (현재 로그인 사용자) ─────────────────────
   AppUser _currentUser = AppUser(
     id: 'u1', name: '김지수', email: 'jisu@company.com',
@@ -298,7 +411,6 @@ class AppProvider extends ChangeNotifier {
 
   Project? get selectedProject {
     if (_selectedProjectId == null || selectedTeam == null) return null;
-    final allProjects = selectedTeam!.projectIds;
     for (final team in _teams) {
       for (final proj in _getTeamProjects(team.id)) {
         if (proj.id == _selectedProjectId) return proj;
@@ -485,6 +597,7 @@ class AppProvider extends ChangeNotifier {
       projectIds: [], createdAt: DateTime.now(),
     );
     _teams.add(team);
+    if (_uid != null) _fs.saveTeam(_uid!, team);
     notifyListeners();
   }
 
@@ -510,6 +623,26 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 팀 삭제 (팀에 속한 프로젝트도 함께 삭제)
+  Future<void> deleteTeam(String teamId) async {
+    final team = _teams.firstWhere((t) => t.id == teamId, orElse: () => _teams.first);
+    // 팀 소속 프로젝트 삭제
+    final projIds = List<String>.from(team.projectIds);
+    for (final pid in projIds) {
+      _projectStore.removeWhere((p) => p.id == pid);
+      if (_uid != null) await _fs.deleteProject(_uid!, pid);
+    }
+    // 팀 삭제
+    _teams.removeWhere((t) => t.id == teamId);
+    if (_uid != null) await _fs.deleteTeam(_uid!, teamId);
+    // 선택된 팀/프로젝트 초기화
+    if (_selectedTeamId == teamId) {
+      _selectedTeamId = _teams.isNotEmpty ? _teams.first.id : null;
+      _selectedProjectId = null;
+    }
+    notifyListeners();
+  }
+
   // ─── Project CRUD ──────────────────────────────────────────
   Project createProject({
     required String teamId, required String name, required String description,
@@ -529,8 +662,69 @@ class AppProvider extends ChangeNotifier {
     _projectStore.add(proj);
     final team = _teams.firstWhere((t) => t.id == teamId, orElse: () => _teams.first);
     team.projectIds.add(proj.id);
+    if (_uid != null) {
+      _fs.saveProject(_uid!, proj);
+      _fs.saveTeam(_uid!, team);
+    }
     notifyListeners();
     return proj;
+  }
+
+  /// 단일 프로젝트 삭제
+  Future<void> deleteProject(String projectId) async {
+    // 팀의 projectIds에서도 제거
+    for (final team in _teams) {
+      team.projectIds.remove(projectId);
+      if (_uid != null) await _fs.saveTeam(_uid!, team);
+    }
+    _projectStore.removeWhere((p) => p.id == projectId);
+    if (_uid != null) await _fs.deleteProject(_uid!, projectId);
+    if (_selectedProjectId == projectId) _selectedProjectId = null;
+    notifyListeners();
+  }
+
+  /// 선택된 팀의 프로젝트 일괄 삭제
+  Future<void> deleteProjectsBulk(List<String> projectIds) async {
+    for (final pid in projectIds) {
+      await deleteProject(pid);
+    }
+  }
+
+  /// 전체 데이터 리셋 (Firebase에서도 삭제 후 샘플 데이터로 재초기화)
+  Future<void> resetAllData() async {
+    if (_uid != null) {
+      // Firebase에서 모든 데이터 삭제
+      final futures = <Future>[];
+      for (final t in List<Team>.from(_teams)) {
+        futures.add(_fs.deleteTeam(_uid!, t.id));
+      }
+      for (final p in List<Project>.from(_projectStore)) {
+        futures.add(_fs.deleteProject(_uid!, p.id));
+      }
+      for (final k in List<KpiModel>.from(_kpis)) {
+        futures.add(_fs.deleteKpi(_uid!, k.id));
+      }
+      for (final c in List<CampaignModel>.from(_campaigns)) {
+        futures.add(_fs.deleteCampaign(_uid!, c.id));
+      }
+      for (final r in List<MarketingRegion>.from(_regions)) {
+        futures.add(_fs.deleteRegion(_uid!, r.id));
+      }
+      for (final c in List<ClientAccount>.from(_clients)) {
+        futures.add(_fs.deleteClient(_uid!, c.id));
+      }
+      await Future.wait(futures);
+    }
+    // 메모리 초기화
+    _teams.clear(); _projectStore.clear(); _kpis.clear();
+    _campaigns.clear(); _funnelStages.clear(); _monthlyData.clear();
+    _monthlyKpiRecords.clear(); _regions.clear(); _clients.clear();
+    _allUsers.clear(); _revenueEntries.clear();
+    _selectedTeamId = null; _selectedProjectId = null; _selectedTaskId = null;
+    // 샘플 데이터 재생성
+    initSampleData();
+    // Firebase에 샘플 데이터 저장
+    if (_uid != null) await _saveAllToFirebase(_uid!);
   }
 
   // ─── Task CRUD ─────────────────────────────────────────────
@@ -552,6 +746,7 @@ class AppProvider extends ChangeNotifier {
     );
     final proj = _projectStore.firstWhere((p) => p.id == projectId, orElse: () => _projectStore.first);
     proj.tasks.add(task);
+    if (_uid != null) _fs.saveProject(_uid!, proj);
     notifyListeners();
     return task;
   }
@@ -561,6 +756,7 @@ class AppProvider extends ChangeNotifier {
     final task = proj.tasks.firstWhere((t) => t.id == taskId);
     task.status = status;
     task.updatedAt = DateTime.now();
+    if (_uid != null) _fs.saveProject(_uid!, proj);
     notifyListeners();
   }
 
@@ -678,12 +874,24 @@ class AppProvider extends ChangeNotifier {
   }
 
   // ─── KPI CRUD ──────────────────────────────────────────────
-  void addKpi(KpiModel kpi) { _kpis.add(kpi); notifyListeners(); }
+  void addKpi(KpiModel kpi) {
+    _kpis.add(kpi);
+    if (_uid != null) _fs.saveKpi(_uid!, kpi);
+    notifyListeners();
+  }
   void updateKpi(KpiModel updated) {
     final idx = _kpis.indexWhere((k) => k.id == updated.id);
-    if (idx >= 0) { _kpis[idx] = updated; notifyListeners(); }
+    if (idx >= 0) {
+      _kpis[idx] = updated;
+      if (_uid != null) _fs.saveKpi(_uid!, updated);
+      notifyListeners();
+    }
   }
-  void deleteKpi(String id) { _kpis.removeWhere((k) => k.id == id); notifyListeners(); }
+  void deleteKpi(String id) {
+    _kpis.removeWhere((k) => k.id == id);
+    if (_uid != null) _fs.deleteKpi(_uid!, id);
+    notifyListeners();
+  }
 
   // ─── User Profile Update ───────────────────────────────────
   void updateCurrentUser({
@@ -1336,21 +1544,44 @@ class AppProvider extends ChangeNotifier {
   }
 
   // ─── 권역 CRUD ────────────────────────────────────────────
-  void addRegion(MarketingRegion r) { _regions.add(r); notifyListeners(); }
+  void addRegion(MarketingRegion r) {
+    _regions.add(r);
+    if (_uid != null) _fs.saveRegion(_uid!, r);
+    notifyListeners();
+  }
   void updateRegion(MarketingRegion r) {
     final i = _regions.indexWhere((x) => x.id == r.id);
-    if (i >= 0) { _regions[i] = r; notifyListeners(); }
+    if (i >= 0) {
+      _regions[i] = r;
+      if (_uid != null) _fs.saveRegion(_uid!, r);
+      notifyListeners();
+    }
   }
-  void deleteRegion(String id) { _regions.removeWhere((r) => r.id == id); notifyListeners(); }
-
+  void deleteRegion(String id) {
+    _regions.removeWhere((r) => r.id == id);
+    if (_uid != null) _fs.deleteRegion(_uid!, id);
+    notifyListeners();
+  }
 
   // ─── 고객사 CRUD ──────────────────────────────────────────
-  void addClient(ClientAccount c) { _clients.add(c); notifyListeners(); }
+  void addClient(ClientAccount c) {
+    _clients.add(c);
+    if (_uid != null) _fs.saveClient(_uid!, c);
+    notifyListeners();
+  }
   void updateClient(ClientAccount c) {
     final i = _clients.indexWhere((x) => x.id == c.id);
-    if (i >= 0) { _clients[i] = c; notifyListeners(); }
+    if (i >= 0) {
+      _clients[i] = c;
+      if (_uid != null) _fs.saveClient(_uid!, c);
+      notifyListeners();
+    }
   }
-  void deleteClient(String id) { _clients.removeWhere((c) => c.id == id); notifyListeners(); }
+  void deleteClient(String id) {
+    _clients.removeWhere((c) => c.id == id);
+    if (_uid != null) _fs.deleteClient(_uid!, id);
+    notifyListeners();
+  }
 
   // ─── 매출/오더 항목 CRUD ──────────────────────────────────
   void addRevenueEntry(ProjectRevenueEntry e) { _revenueEntries.add(e); notifyListeners(); }

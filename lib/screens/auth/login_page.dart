@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/app_provider.dart';
 import '../../l10n/app_localizations.dart';
 
 class LoginPage extends StatefulWidget {
@@ -60,7 +61,11 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       if (agreed != true) return;
     }
     final ok = await auth.signInWithEmail(_emailCtrl.text.trim(), _pwCtrl.text);
-    if (ok && mounted) _goToDashboard();
+    if (ok && mounted) {
+      final uid = auth.user?.id ?? _emailCtrl.text.trim();
+      await context.read<AppProvider>().setUidAndLoad(uid);
+      _goToDashboard();
+    }
   }
 
   // ── Register ─────────────────────────────────────────────
@@ -77,7 +82,11 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     if (!auth.privacyAgreed) await auth.agreeToPrivacy();
     final ok = await auth.registerWithEmail(
         _emailCtrl.text.trim(), _pwCtrl.text, _nameCtrl.text.trim());
-    if (ok && mounted) _goToDashboard();
+    if (ok && mounted) {
+      final uid = auth.user?.id ?? _emailCtrl.text.trim();
+      await context.read<AppProvider>().setUidAndLoad(uid);
+      _goToDashboard();
+    }
   }
 
   Future<bool?> _showPrivacyDialog() {
