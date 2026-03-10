@@ -7,6 +7,7 @@ class AppProvider extends ChangeNotifier {
   // ─── Firebase UID (로그인 후 설정) ────────────────────────
   String? _uid;
   bool _firebaseLoaded = false;
+  bool _dataReady = false;      // 대시보드 표시 준비 완료 여부
   final FirestoreService _fs = FirestoreService();
 
   // 실시간 스트림 구독 취소
@@ -14,11 +15,51 @@ class AppProvider extends ChangeNotifier {
   StreamSubscription<List<Project>>? _projectsSub;
   final Map<String, StreamSubscription<List<Project>>> _sharedProjectSubs = {};
 
+  /// 대시보드 진입 가능 여부 (데이터 로딩 완료)
+  bool get isDataReady => _dataReady;
+
+  /// Firebase Auth 유저 정보를 AppProvider의 currentUser에 동기화
+  void syncAuthUser({
+    required String uid,
+    required String name,
+    required String email,
+    String? avatarUrl,
+  }) {
+    // 이미 샘플 데이터에 있는 유저 또는 새 유저 생성
+    final initials = name.length >= 2 ? name.substring(0, 2) : name;
+    _currentUser = AppUser(
+      id: uid,
+      name: name,
+      email: email,
+      avatarInitials: initials,
+      avatarColor: '#00BFA5',
+      jobTitle: JobTitle.teamLead,
+      department: '마케팅팀',
+    );
+    // allUsers 에도 반영
+    final idx = _allUsers.indexWhere((u) => u.id == uid);
+    if (idx >= 0) {
+      _allUsers[idx] = _currentUser;
+    } else {
+      _allUsers.add(_currentUser);
+    }
+    if (kDebugMode) debugPrint('[AppProvider] syncAuthUser: $name ($uid)');
+    notifyListeners();
+  }
+
   /// 로그인 후 uid를 설정하고 Firebase에서 데이터 로드
   Future<void> setUidAndLoad(String uid) async {
     _uid = uid;
+    _dataReady = false;
+    notifyListeners();
+    // 샘플 데이터 초기화 (아직 initSampleData 호출 안 됐을 경우)
+    if (_teams.isEmpty && _kpis.isEmpty) {
+      initSampleData();
+    }
     await _loadFromFirebase(uid);
     _startRealTimeSync(uid);
+    _dataReady = true;
+    notifyListeners();
   }
 
   void _startRealTimeSync(String uid) {
@@ -93,6 +134,8 @@ class AppProvider extends ChangeNotifier {
     _projectsSub = null;
     _uid = null;
     _firebaseLoaded = false;
+    _dataReady = false;
+    notifyListeners();
   }
 
   Future<void> _loadFromFirebase(String uid) async {
@@ -100,8 +143,7 @@ class AppProvider extends ChangeNotifier {
     if (!_fs.isAvailable) {
       if (kDebugMode) debugPrint('[AppProvider] Firebase offline → using local sample data');
       _firebaseLoaded = false;
-      notifyListeners();
-      return;
+      return;   // setUidAndLoad 에서 _dataReady = true 처리
     }
 
     try {
@@ -123,6 +165,12 @@ class AppProvider extends ChangeNotifier {
           if (bundle.members.isNotEmpty) {
             _allUsers.clear(); _allUsers.addAll(bundle.members);
           }
+          // Firebase 로드 후 currentUser를 uid 기준으로 갱신
+          final fbUser = _allUsers.firstWhere(
+            (u) => u.id == uid,
+            orElse: () => _currentUser,
+          );
+          _currentUser = fbUser;
           if (kDebugMode) debugPrint('[AppProvider] Loaded existing user data from Firebase');
         }
         // 유저 프리퍼런스 로드 (디폴트 페이지 등)
@@ -133,12 +181,10 @@ class AppProvider extends ChangeNotifier {
         }
       }
       _firebaseLoaded = true;
-      notifyListeners();
     } catch (e) {
       // Firebase 실패해도 로컬 샘플 데이터로 계속 동작
       if (kDebugMode) debugPrint('[AppProvider] Firebase load error → using local data: $e');
       _firebaseLoaded = false;
-      notifyListeners();
     }
   }
 

@@ -49,7 +49,21 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       if (agreed != true) return;
     }
     final ok = await loginFn();
-    if (ok && mounted) _goToDashboard();
+    if (ok && mounted) {
+      // _AppRouter가 auth 상태 변화를 감지해 자동으로 setUidAndLoad + 대시보드 전환
+      // 명시적으로도 호출해서 확실히 처리
+      final uid = auth.user?.id;
+      if (uid != null) {
+        final app = context.read<AppProvider>();
+        app.syncAuthUser(
+          uid: uid,
+          name: auth.user!.displayName,
+          email: auth.user!.email,
+          avatarUrl: auth.user!.avatarUrl,
+        );
+        await app.setUidAndLoad(uid);
+      }
+    }
   }
 
   // ── Email Login ──────────────────────────────────────────
@@ -62,9 +76,18 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     }
     final ok = await auth.signInWithEmail(_emailCtrl.text.trim(), _pwCtrl.text);
     if (ok && mounted) {
-      final uid = auth.user?.id ?? _emailCtrl.text.trim();
-      await context.read<AppProvider>().setUidAndLoad(uid);
-      _goToDashboard();
+      final uid = auth.user?.id;
+      if (uid != null) {
+        final app = context.read<AppProvider>();
+        app.syncAuthUser(
+          uid: uid,
+          name: auth.user!.displayName,
+          email: auth.user!.email,
+          avatarUrl: auth.user!.avatarUrl,
+        );
+        await app.setUidAndLoad(uid);
+      }
+      // _AppRouter가 isDataReady 변화를 감지해 자동으로 대시보드로 전환
     }
   }
 
@@ -83,9 +106,17 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     final ok = await auth.registerWithEmail(
         _emailCtrl.text.trim(), _pwCtrl.text, _nameCtrl.text.trim());
     if (ok && mounted) {
-      final uid = auth.user?.id ?? _emailCtrl.text.trim();
-      await context.read<AppProvider>().setUidAndLoad(uid);
-      _goToDashboard();
+      final uid = auth.user?.id;
+      if (uid != null) {
+        final app = context.read<AppProvider>();
+        app.syncAuthUser(
+          uid: uid,
+          name: auth.user!.displayName,
+          email: auth.user!.email,
+          avatarUrl: auth.user!.avatarUrl,
+        );
+        await app.setUidAndLoad(uid);
+      }
     }
   }
 
@@ -97,10 +128,8 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     );
   }
 
-  void _goToDashboard() {
-    // Replace entire navigator stack
-    Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (_) => false);
-  }
+  // _AppRouter가 auth 상태 변화를 감지해 자동으로 대시보드로 전환하므로
+  // 별도 네비게이션 불필요
 
   @override
   Widget build(BuildContext context) {

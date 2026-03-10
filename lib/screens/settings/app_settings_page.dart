@@ -681,9 +681,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                 context.read<AppProvider>().clearUid();
               }
               await auth.signOut();
-              if (context.mounted) {
-                Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-              }
+              // _AppRouter가 auth 상태 변화를 감지해 자동으로 로그인 페이지로 전환
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRed),
             child: const Text('로그아웃', style: TextStyle(color: Colors.white)),
@@ -706,10 +704,11 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
-              await auth.signOut();
               if (context.mounted) {
-                Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+                context.read<AppProvider>().clearUid();
               }
+              await auth.signOut();
+              // _AppRouter가 auth 상태 변화를 감지해 자동으로 로그인 페이지로 전환
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRed),
             child: const Text('삭제 확인', style: TextStyle(color: Colors.white)),

@@ -17,45 +17,37 @@ import 'screens/settings/region_management_page.dart';
 import 'l10n/app_localizations.dart';
 
 // ─────────────────────────────────────────────────────────────
-//  Firebase 안전 초기화
-//  - PlatformException(channel-error) 차단
-//  - 타임아웃(3초) 적용
-//  - 실패 시 앱은 로컬 모드로 계속 동작
+//  Firebase 안전 초기화 (타임아웃 5초, 실패 시 오프라인 모드)
 // ─────────────────────────────────────────────────────────────
 Future<void> _safeInitFirebase() async {
-  // 이미 초기화됐는지 확인
   try {
-    Firebase.app(); // throws if not initialized
+    Firebase.app();
     if (kDebugMode) debugPrint('[Firebase] already initialized');
     return;
-  } catch (_) {
-    // 아직 초기화되지 않음 → 계속 진행
-  }
+  } catch (_) {}
 
   final completer = Completer<void>();
-
-  // 타임아웃 타이머 (3초)
-  final timer = Timer(const Duration(seconds: 3), () {
+  final timer = Timer(const Duration(seconds: 5), () {
     if (!completer.isCompleted) {
       if (kDebugMode) debugPrint('[Firebase] init timeout → offline mode');
       completer.complete();
     }
   });
 
-  // Firebase 초기화 시도
-  Future(() async {
+  Future<void> _init() async {
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
       if (kDebugMode) debugPrint('[Firebase] initialized ✅');
     } catch (e) {
-      if (kDebugMode) debugPrint('[Firebase] init error: $e → offline mode');
+      if (kDebugMode) debugPrint('[Firebase] init error: $e');
     } finally {
       timer.cancel();
       if (!completer.isCompleted) completer.complete();
     }
-  });
+  }
+  _init();
 
   await completer.future;
 }
@@ -66,27 +58,21 @@ Future<void> _safeInitFirebase() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1) Firebase 초기화 (실패 허용)
   await _safeInitFirebase();
 
-  // 2) Auth 초기화 (5초 타임아웃)
   final authProvider = AuthProvider();
   try {
-    await authProvider.initialize().timeout(const Duration(seconds: 5));
+    await authProvider.initialize().timeout(const Duration(seconds: 6));
   } catch (e) {
     if (kDebugMode) debugPrint('[Auth] initialize timeout: $e');
-    // 타임아웃 시 unauthenticated 상태로 강제 전환
     authProvider.forceUnauthenticated();
   }
 
-  // 3) 앱 실행
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: authProvider),
-        ChangeNotifierProvider(
-          create: (_) => AppProvider()..initSampleData(),
-        ),
+        ChangeNotifierProvider(create: (_) => AppProvider()),
       ],
       child: const TeamplyApp(),
     ),
@@ -127,12 +113,11 @@ class TeamplyApp extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  _AppRouter — 인증 상태 기반 라우터
-//  세션 복원 시 setUidAndLoad 자동 호출
+//  _AppRouter
+//  흐름: unknown → splash → (introDone?) → login → (data loading) → dashboard
 // ─────────────────────────────────────────────────────────────
 class _AppRouter extends StatefulWidget {
   const _AppRouter();
-
   @override
   State<_AppRouter> createState() => _AppRouterState();
 }
@@ -143,16 +128,18 @@ class _AppRouterState extends State<_AppRouter> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _syncUid();
+    _handleAuthChange();
   }
 
-  void _syncUid() {
+  void _handleAuthChange() {
     final auth = context.read<AuthProvider>();
+    final app  = context.read<AppProvider>();
 
     if (!auth.isAuthenticated) {
+      // 로그아웃 시 AppProvider 초기화
       if (_loadedUid != null) {
         _loadedUid = null;
-        context.read<AppProvider>().clearUid();
+        app.clearUid();
       }
       return;
     }
@@ -161,20 +148,47 @@ class _AppRouterState extends State<_AppRouter> {
     if (uid == null || uid == _loadedUid) return;
 
     _loadedUid = uid;
-    Future.microtask(() {
-      if (mounted) {
-        context.read<AppProvider>().setUidAndLoad(uid);
-      }
+    // 마이크로태스크로 처리해 build 중 setState 충돌 방지
+    Future.microtask(() async {
+      if (!mounted) return;
+      // AuthUser 정보를 AppProvider에 반영
+      final user = auth.user!;
+      app.syncAuthUser(
+        uid: user.id,
+        name: user.displayName,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+      );
+      await app.setUidAndLoad(uid);
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final app  = context.watch<AppProvider>();
 
-    if (auth.status == AuthStatus.unknown) return const _SplashScreen();
-    if (!auth.introDone)                    return const IntroPage();
-    if (!auth.isAuthenticated)              return const LoginPage();
+    // 1) 초기화 중 → splash
+    if (auth.status == AuthStatus.unknown) {
+      return const _SplashScreen(message: '');
+    }
+
+    // 2) 인트로 미완료 → 인트로
+    if (!auth.introDone) return const IntroPage();
+
+    // 3) 미인증 → 로그인
+    if (!auth.isAuthenticated) return const LoginPage();
+
+    // 4) 인증됐지만 데이터 아직 로딩 중 → 로딩 스플래시
+    if (!app.isDataReady) {
+      return _SplashScreen(
+        message: '데이터를 불러오는 중...',
+        showProgress: true,
+        userName: auth.user?.displayName,
+      );
+    }
+
+    // 5) 모든 준비 완료 → 대시보드
     return const _ResponsiveShell();
   }
 }
@@ -183,7 +197,15 @@ class _AppRouterState extends State<_AppRouter> {
 //  _SplashScreen
 // ─────────────────────────────────────────────────────────────
 class _SplashScreen extends StatelessWidget {
-  const _SplashScreen();
+  final String message;
+  final bool showProgress;
+  final String? userName;
+
+  const _SplashScreen({
+    this.message = '',
+    this.showProgress = true,
+    this.userName,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -193,21 +215,29 @@ class _SplashScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // 로고
             Container(
-              width: 80,
-              height: 80,
+              width: 88,
+              height: 88,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [AppTheme.mintPrimary, Color(0xFF0097A7)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.mintPrimary.withValues(alpha: 0.35),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
               child: const Icon(
                 Icons.insights_rounded,
                 color: Colors.white,
-                size: 40,
+                size: 44,
               ),
             ),
             const SizedBox(height: 24),
@@ -215,19 +245,41 @@ class _SplashScreen extends StatelessWidget {
               'Teamply',
               style: TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
               ),
             ),
-            const SizedBox(height: 32),
-            const SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: AppTheme.mintPrimary,
+            if (userName != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${userName!}님, 환영합니다',
+                style: const TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 13,
+                ),
               ),
-            ),
+            ],
+            const SizedBox(height: 36),
+            if (showProgress)
+              const SizedBox(
+                width: 36,
+                height: 36,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: AppTheme.mintPrimary,
+                ),
+              ),
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                message,
+                style: const TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -236,7 +288,7 @@ class _SplashScreen extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  _ResponsiveShell — Mobile / Desktop 분기
+//  _ResponsiveShell
 // ─────────────────────────────────────────────────────────────
 class _ResponsiveShell extends StatelessWidget {
   const _ResponsiveShell();
