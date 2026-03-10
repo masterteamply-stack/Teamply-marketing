@@ -160,6 +160,13 @@ class _AppRouterState extends State<_AppRouter> {
         avatarUrl: user.avatarUrl,
       );
       await app.setUidAndLoad(uid);
+      // 로그인 후 기본 팀 대시보드로 자동 이동
+      if (!mounted) return;
+      if (app.selectedTeam != null) {
+        // 기본 팀이 있으면 팀 상세 → 대시보드 순으로 이동
+        app.navigateTo('dashboard');
+        if (kDebugMode) debugPrint('[AppRouter] Auto-navigated to dashboard for team: ${app.selectedTeam!.name}');
+      }
     });
   }
 

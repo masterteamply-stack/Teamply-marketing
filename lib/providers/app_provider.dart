@@ -1,7 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../services/firestore_service.dart';
+
+// ─── 로컬 지속성 키 ─────────────────────────────────────────
+const _kLocalTeams     = 'local_teams_v2';
+const _kLocalProjects  = 'local_projects_v2';
+const _kLocalKpis      = 'local_kpis_v2';
+const _kLocalCampaigns = 'local_campaigns_v2';
+const _kDefaultTeamId  = 'default_team_id';
+const _kUid            = 'last_uid';
 
 class AppProvider extends ChangeNotifier {
   // ─── Firebase UID (로그인 후 설정) ────────────────────────
@@ -57,9 +67,117 @@ class AppProvider extends ChangeNotifier {
     _campaigns.clear(); _funnelStages.clear(); _monthlyData.clear();
     _monthlyKpiRecords.clear(); _regions.clear(); _clients.clear();
     _selectedTeamId = null; _selectedProjectId = null; _selectedTaskId = null;
+
+    // ① 로컬 캐시를 먼저 복원 (즉각 표시)
+    await _loadFromLocal(uid);
+
+    // ② Firebase에서 최신 데이터 동기화
     await _loadFromFirebase(uid);
+
+    // ③ Firebase 동기화 후 로컬 캐시 갱신
+    await _saveToLocal(uid);
+
+    // ④ 기본 팀 자동 선택
+    _autoSelectDefaultTeam();
+
+    // ⑤ 기본 섹션 설정: 팀이 있으면 dashboard, 없으면 teams
+    if (_teams.isNotEmpty) {
+      _currentSection = 'dashboard';
+    } else {
+      _currentSection = 'teams';
+    }
+
     _startRealTimeSync(uid);
     _dataReady = true;
+    notifyListeners();
+  }
+
+  // ─── 로컬 캐시 저장 ─────────────────────────────────────────
+  Future<void> _saveToLocal(String uid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kUid, uid);
+      // 팀 저장
+      await prefs.setString(_kLocalTeams,
+          jsonEncode(_teams.map((t) => t.toJson()).toList()));
+      // 프로젝트 저장
+      await prefs.setString(_kLocalProjects,
+          jsonEncode(_projectStore.map((p) => p.toJson()).toList()));
+      // KPI 저장
+      await prefs.setString(_kLocalKpis,
+          jsonEncode(_kpis.map((k) => k.toJson()).toList()));
+      // 캠페인 저장
+      await prefs.setString(_kLocalCampaigns,
+          jsonEncode(_campaigns.map((c) => c.toJson()).toList()));
+      if (kDebugMode) debugPrint('[AppProvider] Local cache saved');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AppProvider] saveToLocal error: $e');
+    }
+  }
+
+  // ─── 로컬 캐시 로드 ─────────────────────────────────────────
+  Future<void> _loadFromLocal(String uid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedUid = prefs.getString(_kUid);
+      if (savedUid != uid) return; // 다른 계정이면 캐시 무시
+
+      // 팀
+      final teamsJson = prefs.getString(_kLocalTeams);
+      if (teamsJson != null) {
+        final list = jsonDecode(teamsJson) as List;
+        _teams.addAll(list.map((j) => Team.fromJson(j as Map<String, dynamic>)));
+        if (kDebugMode) debugPrint('[AppProvider] Local teams loaded: ${_teams.length}');
+      }
+      // 프로젝트
+      final projsJson = prefs.getString(_kLocalProjects);
+      if (projsJson != null) {
+        final list = jsonDecode(projsJson) as List;
+        _projectStore.addAll(list.map((j) => Project.fromJson(j as Map<String, dynamic>)));
+      }
+      // KPI
+      final kpisJson = prefs.getString(_kLocalKpis);
+      if (kpisJson != null) {
+        final list = jsonDecode(kpisJson) as List;
+        _kpis.addAll(list.map((j) => KpiModel.fromJson(j as Map<String, dynamic>)));
+      }
+      // 캠페인
+      final campaignsJson = prefs.getString(_kLocalCampaigns);
+      if (campaignsJson != null) {
+        final list = jsonDecode(campaignsJson) as List;
+        _campaigns.addAll(list.map((j) => CampaignModel.fromJson(j as Map<String, dynamic>)));
+      }
+      // 기본 팀 복원
+      final defaultTeamId = prefs.getString(_kDefaultTeamId);
+      if (defaultTeamId != null && _teams.any((t) => t.id == defaultTeamId)) {
+        _selectedTeamId = defaultTeamId;
+      }
+      if (_teams.isNotEmpty && _selectedTeamId == null) {
+        _selectedTeamId = _teams.first.id;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AppProvider] loadFromLocal error: $e');
+    }
+  }
+
+  // ─── 기본 팀 자동 선택 ─────────────────────────────────────
+  void _autoSelectDefaultTeam() {
+    if (_teams.isEmpty) return;
+    // defaultTeamId가 저장되어 있으면 그 팀으로
+    // 없으면 첫 번째 팀으로
+    if (_selectedTeamId == null || !_teams.any((t) => t.id == _selectedTeamId)) {
+      _selectedTeamId = _teams.first.id;
+    }
+    if (kDebugMode) debugPrint('[AppProvider] Default team: $_selectedTeamId');
+  }
+
+  /// 기본 팀을 설정하고 로컬 저장
+  Future<void> setDefaultTeam(String teamId) async {
+    _selectedTeamId = teamId;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kDefaultTeamId, teamId);
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -729,18 +847,61 @@ class AppProvider extends ChangeNotifier {
       projectIds: [], createdAt: DateTime.now(),
     );
     _teams.add(team);
-    if (_uid != null) _fs.saveTeam(_uid!, team);
+    if (_uid != null) {
+      _fs.saveTeam(_uid!, team);
+      _saveToLocal(_uid!); // 로컬 캐시 갱신
+    }
     notifyListeners();
   }
 
   void inviteMember(String teamId, String userId, MemberRole role) {
-    final team = _teams.firstWhere((t) => t.id == teamId, orElse: () => _teams.first);
-    final user = _allUsers.firstWhere((u) => u.id == userId, orElse: () => _allUsers.first);
-    team.members.add(TeamMember(
+    final idx = _teams.indexWhere((t) => t.id == teamId);
+    if (idx < 0) return;
+    final user = _allUsers.firstWhere((u) => u.id == userId, orElse: () => _currentUser);
+    _teams[idx].members.add(TeamMember(
       id: 'tm_${DateTime.now().millisecondsSinceEpoch}',
       user: user, role: role, joinedAt: DateTime.now(),
     ));
+    if (_uid != null) {
+      _fs.saveTeam(_uid!, _teams[idx]);
+      _saveToLocal(_uid!);
+    }
     notifyListeners();
+  }
+
+  /// 이메일로 새 멤버를 팀에 추가 (allUsers에도 등록)
+  void inviteMemberByEmail({
+    required String teamId,
+    required String email,
+    required String name,
+    required MemberRole role,
+  }) {
+    // allUsers에 없으면 새 유저 생성
+    final existing = _allUsers.firstWhere(
+      (u) => u.email.toLowerCase() == email.toLowerCase(),
+      orElse: () => AppUser(id: '', name: '', email: '', avatarInitials: '', avatarColor: '#999'),
+    );
+    final AppUser newUser;
+    if (existing.id.isEmpty) {
+      newUser = AppUser(
+        id: 'u_${DateTime.now().millisecondsSinceEpoch}',
+        name: name,
+        email: email,
+        avatarInitials: name.length >= 2 ? name.substring(0, 2) : name,
+        avatarColor: _randomColor(),
+        jobTitle: JobTitle.member,
+        department: '',
+      );
+      _allUsers.add(newUser);
+    } else {
+      newUser = existing;
+    }
+    inviteMember(teamId, newUser.id, role);
+  }
+
+  static String _randomColor() {
+    const colors = ['#29B6F6','#AB47BC','#FF7043','#FFB300','#66BB6A','#EF5350','#26C6DA'];
+    return colors[DateTime.now().millisecondsSinceEpoch % colors.length];
   }
 
   void updateMemberRole(String teamId, String memberId, MemberRole newRole) {
@@ -1025,20 +1186,29 @@ class AppProvider extends ChangeNotifier {
         ? kpi.copyWith(teamId: _selectedTeamId)
         : kpi;
     _kpis.add(kpiWithTeam);
-    if (_uid != null) _fs.saveKpi(_uid!, kpiWithTeam);
+    if (_uid != null) {
+      _fs.saveKpi(_uid!, kpiWithTeam);
+      _saveToLocal(_uid!);
+    }
     notifyListeners();
   }
   void updateKpi(KpiModel updated) {
     final idx = _kpis.indexWhere((k) => k.id == updated.id);
     if (idx >= 0) {
       _kpis[idx] = updated;
-      if (_uid != null) _fs.saveKpi(_uid!, updated);
+      if (_uid != null) {
+        _fs.saveKpi(_uid!, updated);
+        _saveToLocal(_uid!);
+      }
       notifyListeners();
     }
   }
   void deleteKpi(String id) {
     _kpis.removeWhere((k) => k.id == id);
-    if (_uid != null) _fs.deleteKpi(_uid!, id);
+    if (_uid != null) {
+      _fs.deleteKpi(_uid!, id);
+      _saveToLocal(_uid!);
+    }
     notifyListeners();
   }
 
@@ -1052,6 +1222,69 @@ class AppProvider extends ChangeNotifier {
     proj.tasks.removeWhere((t) => t.id == taskId);
     if (_selectedTaskId == taskId) _selectedTaskId = null;
     if (_uid != null) _fs.saveProject(_uid!, proj);
+    notifyListeners();
+  }
+
+  /// KPI 일괄 CSV 업로드
+  /// columns: name, current, target, unit, category, date
+  List<String> bulkAddKpisFromCsv(List<Map<String, String>> rows) {
+    final errors = <String>[];
+    final categories = ['매출', 'ROI', 'ROAS', '리드', 'CTR', 'SEO', '콘텐츠', 'SNS', '이메일', '광고', '전환', '기타'];
+    int added = 0;
+
+    for (int i = 0; i < rows.length; i++) {
+      final row = rows[i];
+      final name = (row['name'] ?? row['title'] ?? '').trim();
+      if (name.isEmpty) {
+        errors.add('행 ${i+2}: 이름(name)이 비어 있습니다');
+        continue;
+      }
+      final target = double.tryParse(row['target'] ?? '');
+      if (target == null) {
+        errors.add('행 ${i+2}: 목표값(target)이 유효하지 않습니다');
+        continue;
+      }
+      final current = double.tryParse(row['current'] ?? '') ?? 0;
+      final unit = (row['unit'] ?? '건').trim();
+      final rawCat = (row['category'] ?? '기타').trim();
+      final category = categories.contains(rawCat) ? rawCat : '기타';
+
+      DateTime dueDate = DateTime(DateTime.now().year, 12, 31);
+      final dateStr = row['date'] ?? row['duedate'] ?? row['due_date'] ?? '';
+      if (dateStr.isNotEmpty) {
+        final parsed = DateTime.tryParse(dateStr);
+        if (parsed != null) dueDate = parsed;
+      }
+
+      final kpi = KpiModel(
+        id: 'kpi_csv_${DateTime.now().millisecondsSinceEpoch}_$i',
+        title: name,
+        category: category,
+        target: target,
+        current: current,
+        unit: unit,
+        period: _selectedPeriod,
+        isTeamKpi: true,
+        dueDate: dueDate,
+        teamId: _selectedTeamId,
+      );
+      _kpis.add(kpi);
+      if (_uid != null) _fs.saveKpi(_uid!, kpi);
+      added++;
+    }
+
+    if (_uid != null && added > 0) _saveToLocal(_uid!);
+    if (added > 0) notifyListeners();
+    return errors;
+  }
+
+  /// KPI 일괄 삭제
+  void deleteKpisBulk(List<String> ids) {
+    _kpis.removeWhere((k) => ids.contains(k.id));
+    if (_uid != null) {
+      for (final id in ids) _fs.deleteKpi(_uid!, id);
+      _saveToLocal(_uid!);
+    }
     notifyListeners();
   }
 
