@@ -249,6 +249,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get introSubtitle3 => 'リアルタイム為替レートであらゆる通貨に対応';
 
   @override
+  String get appSubtitle => 'チームとプロジェクトをひとまとめに';
+
+  @override
   String get getStarted => 'はじめる';
 
   @override

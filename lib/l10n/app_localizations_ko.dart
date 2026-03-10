@@ -249,6 +249,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get introSubtitle3 => '실시간 환율로 어떤 통화든 자유롭게 사용하세요';
 
   @override
+  String get appSubtitle => '팀과 프로젝트를 한곳에서 관리하세요';
+
+  @override
   String get getStarted => '시작하기';
 
   @override

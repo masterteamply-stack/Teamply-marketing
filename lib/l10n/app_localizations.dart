@@ -586,6 +586,12 @@ abstract class AppLocalizations {
   /// **'Work in any currency with live exchange rates'**
   String get introSubtitle3;
 
+  /// App subtitle shown on intro screen
+  ///
+  /// In en, this message translates to:
+  /// **'Manage your team and projects in one place'**
+  String get appSubtitle;
+
   /// No description provided for @getStarted.
   ///
   /// In en, this message translates to:

@@ -80,6 +80,10 @@
   "introSubtitle2": "实时追踪KPI、漏斗和ROI",
   "introTitle3": "多货币支持",
   "introSubtitle3": "使用实时汇率，自由使用任何货币",
+  "appSubtitle": "在一处管理您的团队和项目",
+  "@appSubtitle": {
+    "description": "App subtitle shown on intro screen"
+  },
   "getStarted": "开始使用",
   "skip": "跳过",
   "next": "下一步",

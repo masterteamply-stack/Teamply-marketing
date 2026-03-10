@@ -80,6 +80,10 @@
   "introSubtitle2": "KPI, 퍼널, ROI를 실시간으로 추적하세요",
   "introTitle3": "다중 통화 지원",
   "introSubtitle3": "실시간 환율로 어떤 통화든 자유롭게 사용하세요",
+  "appSubtitle": "팀과 프로젝트를 한곳에서 관리하세요",
+  "@appSubtitle": {
+    "description": "App subtitle shown on intro screen"
+  },
   "getStarted": "시작하기",
   "skip": "건너뛰기",
   "next": "다음",

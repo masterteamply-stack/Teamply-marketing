@@ -80,6 +80,10 @@
   "introSubtitle2": "Monitoriza KPIs, embudos y ROI en tiempo real",
   "introTitle3": "Soporte multidivisa",
   "introSubtitle3": "Trabaja con cualquier moneda con tipos de cambio en vivo",
+  "appSubtitle": "Gestiona tu equipo y proyectos en un solo lugar",
+  "@appSubtitle": {
+    "description": "App subtitle shown on intro screen"
+  },
   "getStarted": "Comenzar",
   "skip": "Omitir",
   "next": "Siguiente",

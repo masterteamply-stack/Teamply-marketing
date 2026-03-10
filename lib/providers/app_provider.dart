@@ -12,6 +12,7 @@ class AppProvider extends ChangeNotifier {
   // 실시간 스트림 구독 취소
   StreamSubscription<List<Team>>? _teamsSub;
   StreamSubscription<List<Project>>? _projectsSub;
+  final Map<String, StreamSubscription<List<Project>>> _sharedProjectSubs = {};
 
   /// 로그인 후 uid를 설정하고 Firebase에서 데이터 로드
   Future<void> setUidAndLoad(String uid) async {
@@ -30,12 +31,14 @@ class AppProvider extends ChangeNotifier {
         _teams.clear();
         _teams.addAll(teams);
         notifyListeners();
+        // 팀이 업데이트되면 공유 프로젝트 구독도 갱신
+        _subscribeSharedProjects();
       }
     }, onError: (e) {
       if (kDebugMode) debugPrint('watchTeams error: $e');
     });
 
-    // 프로젝트 실시간 동기화
+    // 개인 프로젝트 실시간 동기화
     _projectsSub = _fs.watchProjects(uid).listen((projects) {
       if (projects.isNotEmpty) {
         _projectStore.clear();
@@ -45,11 +48,47 @@ class AppProvider extends ChangeNotifier {
     }, onError: (e) {
       if (kDebugMode) debugPrint('watchProjects error: $e');
     });
+
+    // 공유 프로젝트 초기 구독
+    _subscribeSharedProjects();
+  }
+
+  /// 각 팀의 공유 프로젝트 실시간 구독 (팀원 전원 동기화)
+  void _subscribeSharedProjects() {
+    // 기존 구독 중 더 이상 없는 팀은 취소
+    final currentTeamIds = _teams.map((t) => t.id).toSet();
+    _sharedProjectSubs.keys.toList().forEach((tid) {
+      if (!currentTeamIds.contains(tid)) {
+        _sharedProjectSubs[tid]?.cancel();
+        _sharedProjectSubs.remove(tid);
+      }
+    });
+
+    // 새 팀에 대한 구독 추가
+    for (final team in _teams) {
+      if (_sharedProjectSubs.containsKey(team.id)) continue;
+      _sharedProjectSubs[team.id] = _fs.watchSharedProjects(team.id).listen((sharedProjs) {
+        // 공유 프로젝트를 로컬 store에 merge (중복 제거)
+        for (final sp in sharedProjs) {
+          final idx = _projectStore.indexWhere((p) => p.id == sp.id);
+          if (idx >= 0) {
+            _projectStore[idx] = sp; // 업데이트
+          } else {
+            _projectStore.add(sp); // 새로 추가
+          }
+        }
+        notifyListeners();
+      }, onError: (e) {
+        if (kDebugMode) debugPrint('watchSharedProjects ${team.id} error: $e');
+      });
+    }
   }
 
   void clearUid() {
     _teamsSub?.cancel();
     _projectsSub?.cancel();
+    for (final sub in _sharedProjectSubs.values) { sub.cancel(); }
+    _sharedProjectSubs.clear();
     _teamsSub = null;
     _projectsSub = null;
     _uid = null;
@@ -85,6 +124,12 @@ class AppProvider extends ChangeNotifier {
             _allUsers.clear(); _allUsers.addAll(bundle.members);
           }
           if (kDebugMode) debugPrint('[AppProvider] Loaded existing user data from Firebase');
+        }
+        // 유저 프리퍼런스 로드 (디폴트 페이지 등)
+        final prefs = await _fs.loadUserPrefs(uid);
+        if (prefs != null) {
+          _defaultSection = prefs['defaultSection'] as String? ?? 'dashboard';
+          _currentSection = _defaultSection;
         }
       }
       _firebaseLoaded = true;
@@ -157,6 +202,7 @@ class AppProvider extends ChangeNotifier {
   String? _selectedProjectId;
   String? _selectedTaskId;
   String _currentSection = 'dashboard';
+  String _defaultSection  = 'dashboard'; // 로그인 후 기본 페이지
   String _selectedKpiTrackerId = 'kpi1';
   String _selectedPeriod = 'Q1 2025';
   // 'YYYY' 형태 연도 또는 'Q1 YYYY' 형태 쿼터
@@ -382,6 +428,7 @@ class AppProvider extends ChangeNotifier {
     return rate > 0 ? krwAmount / rate : krwAmount;
   }
   String get currentSection => _currentSection;
+  String get defaultSection  => _defaultSection;
   String get selectedKpiTrackerId => _selectedKpiTrackerId;
   String get selectedPeriod => _selectedPeriod;
   String get selectedYear => _selectedYear;
@@ -549,6 +596,16 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 디폴트(시작) 페이지 설정 — Firestore에도 저장
+  Future<void> setDefaultSection(String section) async {
+    _defaultSection  = section;
+    _currentSection  = section;
+    notifyListeners();
+    if (_uid != null && _fs.isAvailable) {
+      await _fs.saveUserPrefs(_uid!, {'defaultSection': section});
+    }
+  }
+
   void selectTeam(String teamId) {
     _selectedTeamId = teamId;
     _selectedProjectId = null;
@@ -663,11 +720,24 @@ class AppProvider extends ChangeNotifier {
     final team = _teams.firstWhere((t) => t.id == teamId, orElse: () => _teams.first);
     team.projectIds.add(proj.id);
     if (_uid != null) {
-      _fs.saveProject(_uid!, proj);
+      _fs.saveProject(_uid!, proj);        // 개인 store 저장
       _fs.saveTeam(_uid!, team);
+      _fs.saveSharedProject(teamId, proj); // 팀 공유 저장 (팀원 동기화)
     }
     notifyListeners();
     return proj;
+  }
+
+  /// 프로젝트 업데이트 — Firestore에도 즉시 저장
+  Future<void> updateProject(Project updated) async {
+    final idx = _projectStore.indexWhere((p) => p.id == updated.id);
+    if (idx < 0) return;
+    _projectStore[idx] = updated;
+    if (_uid != null) {
+      await _fs.saveProject(_uid!, updated);          // 개인 store
+      await _fs.saveSharedProject(updated.teamId, updated); // 팀 공유
+    }
+    notifyListeners();
   }
 
   /// 단일 프로젝트 삭제
@@ -1630,8 +1700,8 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ─── 프로젝트 전체 편집 ────────────────────────────────────
-  void updateProject(String projectId, {
+  // ─── 프로젝트 전체 편집 + Firestore 즉시 저장 ──────────────
+  void updateProjectFields(String projectId, {
     String? name, String? description, String? category,
     ProjectStatus? status, String? colorHex, String? iconEmoji,
     DateTime? dueDate, List<String>? memberIds,
@@ -1648,6 +1718,11 @@ class AppProvider extends ChangeNotifier {
         if (memberIds != null) {
           proj.memberIds.clear();
           proj.memberIds.addAll(memberIds);
+        }
+        // Firestore 즉시 저장
+        if (_uid != null) {
+          _fs.saveProject(_uid!, proj);
+          _fs.saveSharedProject(proj.teamId, proj);
         }
         notifyListeners();
         return;

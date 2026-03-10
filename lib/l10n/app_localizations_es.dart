@@ -256,6 +256,9 @@ class AppLocalizationsEs extends AppLocalizations {
       'Trabaja con cualquier moneda con tipos de cambio en vivo';
 
   @override
+  String get appSubtitle => 'Gestiona tu equipo y proyectos en un solo lugar';
+
+  @override
   String get getStarted => 'Comenzar';
 
   @override

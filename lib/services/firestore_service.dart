@@ -407,6 +407,87 @@ class FirestoreService {
   }
 
   // ════════════════════════════════════════════════════════
+  //  유저 프리퍼런스 저장/로드 (디폴트 페이지 등)
+  // ════════════════════════════════════════════════════════
+  Future<void> saveUserPrefs(String uid, Map<String, dynamic> prefs) async {
+    if (!isAvailable) return;
+    try {
+      await _userDoc(uid)?.set({'prefs': prefs}, SetOptions(merge: true));
+      if (kDebugMode) debugPrint('[Firestore] saveUserPrefs ✅');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Firestore] saveUserPrefs error: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> loadUserPrefs(String uid) async {
+    if (!isAvailable) return null;
+    try {
+      final doc = await _userDoc(uid)?.get();
+      if (doc == null || !doc.exists) return null;
+      final data = doc.data() as Map<String, dynamic>?;
+      return data?['prefs'] as Map<String, dynamic>?;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Firestore] loadUserPrefs error: $e');
+      return null;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  공유 프로젝트 (teams/{teamId}/shared_projects/{projectId})
+  //  팀 멤버 전원이 동일 문서를 읽고 씀
+  // ════════════════════════════════════════════════════════
+  CollectionReference? _sharedProjectsCol(String teamId) =>
+      _db?.collection('teams').doc(teamId).collection('projects');
+
+  /// 공유 프로젝트 저장 (팀 컬렉션에 저장)
+  Future<void> saveSharedProject(String teamId, Project project) async {
+    if (!isAvailable) return;
+    try {
+      await _sharedProjectsCol(teamId)?.doc(project.id).set(project.toJson());
+      if (kDebugMode) debugPrint('[Firestore] saveSharedProject ✅ team=$teamId proj=${project.id}');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Firestore] saveSharedProject error: $e');
+    }
+  }
+
+  /// 공유 프로젝트 삭제
+  Future<void> deleteSharedProject(String teamId, String projectId) async {
+    if (!isAvailable) return;
+    try {
+      await _sharedProjectsCol(teamId)?.doc(projectId).delete();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Firestore] deleteSharedProject error: $e');
+    }
+  }
+
+  /// 팀 공유 프로젝트 실시간 스트림
+  Stream<List<Project>> watchSharedProjects(String teamId) {
+    if (!isAvailable) return const Stream.empty();
+    try {
+      return _sharedProjectsCol(teamId)!
+          .snapshots()
+          .map((snap) => _parse(snap, Project.fromJson));
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Firestore] watchSharedProjects error: $e');
+      return const Stream.empty();
+    }
+  }
+
+  /// 공유 프로젝트 전체 로드
+  Future<List<Project>> loadSharedProjects(String teamId) async {
+    if (!isAvailable) return [];
+    try {
+      final col = _sharedProjectsCol(teamId);
+      if (col == null) return [];
+      final snap = await col.get();
+      return _parse(snap, Project.fromJson);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Firestore] loadSharedProjects error: $e');
+      return [];
+    }
+  }
+
+  // ════════════════════════════════════════════════════════
   //  대시보드 설정 저장/로드
   // ════════════════════════════════════════════════════════
   Future<void> saveDashboardConfig(

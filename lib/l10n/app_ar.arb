@@ -80,6 +80,10 @@
   "introSubtitle2": "تتبع مؤشرات الأداء والقمع والعائد على الاستثمار",
   "introTitle3": "دعم متعدد العملات",
   "introSubtitle3": "اعمل بأي عملة مع أسعار صرف حية",
+  "appSubtitle": "أدر فريقك ومشاريعك في مكان واحد",
+  "@appSubtitle": {
+    "description": "App subtitle shown on intro screen"
+  },
   "getStarted": "البدء",
   "skip": "تخطي",
   "next": "التالي",

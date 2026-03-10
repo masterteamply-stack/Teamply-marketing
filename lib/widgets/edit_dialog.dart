@@ -361,7 +361,7 @@ class _ProjectEditDialogState extends State<ProjectEditDialog> {
   @override void dispose() { _nameCtrl.dispose(); _descCtrl.dispose(); _catCtrl.dispose(); super.dispose(); }
 
   void _save() {
-    widget.provider.updateProject(
+    widget.provider.updateProjectFields(
       widget.project.id,
       name: _nameCtrl.text.trim(),
       description: _descCtrl.text.trim(),

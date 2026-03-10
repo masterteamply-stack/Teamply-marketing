@@ -26,6 +26,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final app  = context.watch<AppProvider>();
     final l10n = AppLocalizations.of(context);
 
     return Scaffold(
@@ -100,6 +101,13 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
               _sectionTitle('계정'),
               _settingsCard([
                 _accountTile(auth),
+              ]),
+              const SizedBox(height: 20),
+
+              // ── 앱 설정 (디폴트 페이지) ──────────────────
+              _sectionTitle('앱 설정'),
+              _settingsCard([
+                _defaultPageTile(context, app),
               ]),
               const SizedBox(height: 20),
             ],
@@ -237,6 +245,121 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
             ]),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── 디폴트 페이지 선택 타일 ──────────────────────────────
+  static const List<Map<String, dynamic>> _pageOptions = [
+    {'id': 'dashboard',   'label': '대시보드',    'icon': Icons.dashboard_rounded},
+    {'id': 'kpi',         'label': 'KPI',         'icon': Icons.bar_chart_rounded},
+    {'id': 'campaign',    'label': '캠페인',       'icon': Icons.campaign_rounded},
+    {'id': 'funnel',      'label': '퍼널',         'icon': Icons.filter_alt_rounded},
+    {'id': 'teams',       'label': '팀 목록',      'icon': Icons.groups_rounded},
+    {'id': 'geo_analysis','label': '지역 분석',    'icon': Icons.public_rounded},
+  ];
+
+  Widget _defaultPageTile(BuildContext context, AppProvider app) {
+    final current = _pageOptions.firstWhere(
+      (p) => p['id'] == app.defaultSection,
+      orElse: () => _pageOptions.first,
+    );
+
+    return _settingsTile(
+      icon: current['icon'] as IconData,
+      iconColor: AppTheme.mintPrimary,
+      title: '시작 페이지',
+      subtitle: '로그인 후 표시할 기본 페이지: ${current['label']}',
+      onTap: () => _showDefaultPageSheet(context, app),
+    );
+  }
+
+  void _showDefaultPageSheet(BuildContext context, AppProvider app) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.bgCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setS) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '시작 페이지 설정',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                '로그인 후 자동으로 이동할 페이지를 선택하세요',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              ..._pageOptions.map((opt) {
+                final isSelected = app.defaultSection == opt['id'];
+                return InkWell(
+                  onTap: () async {
+                    await app.setDefaultSection(opt['id'] as String);
+                    if (context.mounted) Navigator.pop(context);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('시작 페이지가 "${opt['label']}"으로 설정되었습니다'),
+                          backgroundColor: AppTheme.mintPrimary,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    margin: const EdgeInsets.only(bottom: 4),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppTheme.mintPrimary.withValues(alpha: 0.12)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppTheme.mintPrimary.withValues(alpha: 0.5)
+                            : Colors.transparent,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          opt['icon'] as IconData,
+                          color: isSelected ? AppTheme.mintPrimary : AppTheme.textMuted,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          opt['label'] as String,
+                          style: TextStyle(
+                            color: isSelected ? AppTheme.mintPrimary : AppTheme.textPrimary,
+                            fontSize: 14,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (isSelected)
+                          const Icon(Icons.check_circle, color: AppTheme.mintPrimary, size: 18),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
       ),
     );
   }

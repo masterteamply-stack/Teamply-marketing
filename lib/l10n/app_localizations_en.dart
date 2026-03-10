@@ -254,6 +254,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get introSubtitle3 => 'Work in any currency with live exchange rates';
 
   @override
+  String get appSubtitle => 'Manage your team and projects in one place';
+
+  @override
   String get getStarted => 'Get Started';
 
   @override

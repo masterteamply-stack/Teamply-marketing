@@ -251,6 +251,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get introSubtitle3 => 'اعمل بأي عملة مع أسعار صرف حية';
 
   @override
+  String get appSubtitle => 'أدر فريقك ومشاريعك في مكان واحد';
+
+  @override
   String get getStarted => 'البدء';
 
   @override

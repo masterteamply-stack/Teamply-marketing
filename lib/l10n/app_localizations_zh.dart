@@ -249,6 +249,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get introSubtitle3 => '使用实时汇率，自由使用任何货币';
 
   @override
+  String get appSubtitle => '在一处管理您的团队和项目';
+
+  @override
   String get getStarted => '开始使用';
 
   @override

@@ -80,6 +80,10 @@
   "introSubtitle2": "KPI・ファネル・ROIをリアルタイムで追跡",
   "introTitle3": "多通貨対応",
   "introSubtitle3": "リアルタイム為替レートであらゆる通貨に対応",
+  "appSubtitle": "チームとプロジェクトをひとまとめに",
+  "@appSubtitle": {
+    "description": "App subtitle shown on intro screen"
+  },
   "getStarted": "はじめる",
   "skip": "スキップ",
   "next": "次へ",

@@ -80,6 +80,10 @@
   "introSubtitle2": "Track KPIs, funnels, and ROI in real time",
   "introTitle3": "Multi-currency Support",
   "introSubtitle3": "Work in any currency with live exchange rates",
+  "appSubtitle": "Manage your team and projects in one place",
+  "@appSubtitle": {
+    "description": "App subtitle shown on intro screen"
+  },
   "getStarted": "Get Started",
   "skip": "Skip",
   "next": "Next",
