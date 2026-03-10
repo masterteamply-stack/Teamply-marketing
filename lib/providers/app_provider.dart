@@ -52,10 +52,11 @@ class AppProvider extends ChangeNotifier {
     _uid = uid;
     _dataReady = false;
     notifyListeners();
-    // 샘플 데이터 초기화 (아직 initSampleData 호출 안 됐을 경우)
-    if (_teams.isEmpty && _kpis.isEmpty) {
-      initSampleData();
-    }
+    // 이전 데이터 초기화 (다른 계정 로그인 대비)
+    _teams.clear(); _projectStore.clear(); _kpis.clear();
+    _campaigns.clear(); _funnelStages.clear(); _monthlyData.clear();
+    _monthlyKpiRecords.clear(); _regions.clear(); _clients.clear();
+    _selectedTeamId = null; _selectedProjectId = null; _selectedTaskId = null;
     await _loadFromFirebase(uid);
     _startRealTimeSync(uid);
     _dataReady = true;
@@ -149,9 +150,11 @@ class AppProvider extends ChangeNotifier {
     try {
       final isNew = await _fs.isNewUser(uid).timeout(const Duration(seconds: 10));
       if (isNew) {
-        // 첫 가입: 샘플 데이터를 Firebase에 저장
-        await _saveAllToFirebase(uid);
-        if (kDebugMode) debugPrint('[AppProvider] New user → saved sample data to Firebase');
+        // 첫 가입: 빈 상태로 시작 (샘플 데이터 없음) - currentUser 메타만 저장
+        await _fs.saveUserMeta(uid, _currentUser.email, _currentUser.name);
+        if (kDebugMode) debugPrint('[AppProvider] New user → starting with empty data');
+        // 팀/KPI/캠페인은 사용자가 직접 생성
+        if (_teams.isEmpty) _selectedTeamId = null;
       } else {
         // 기존 유저: Firebase에서 데이터 로드
         final bundle = await _fs.loadAllUserData(uid).timeout(const Duration(seconds: 10));
@@ -260,8 +263,20 @@ class AppProvider extends ChangeNotifier {
   List<AppUser> get allUsers => _allUsers;
   List<Team> get teams => _teams;
   List<KpiModel> get kpis => _kpis;
-  List<KpiModel> get teamKpis => _kpis.where((k) => k.isTeamKpi).toList();
-  List<KpiModel> get personalKpis => _kpis.where((k) => !k.isTeamKpi).toList();
+  /// 현재 선택된 팀의 KPI만 반환 (팀 간 공유 없음)
+  List<KpiModel> get teamKpis {
+    if (_selectedTeamId == null) return [];
+    return _kpis.where((k) => k.isTeamKpi && k.teamId == _selectedTeamId).toList();
+  }
+  /// 특정 팀의 모든 KPI (팀 KPI + 해당 팀에 할당된 개인 KPI)
+  List<KpiModel> getKpisForTeam(String teamId) =>
+      _kpis.where((k) => k.teamId == teamId).toList();
+  /// 현재 선택된 팀의 모든 KPI
+  List<KpiModel> get currentTeamKpis {
+    if (_selectedTeamId == null) return [];
+    return _kpis.where((k) => k.teamId == _selectedTeamId).toList();
+  }
+  List<KpiModel> get personalKpis => _kpis.where((k) => !k.isTeamKpi && (k.assignedTo == _currentUser.id)).toList();
   List<CampaignModel> get campaigns => _campaigns;
   List<FunnelStage> get funnelStages => _funnelStages;
   List<MonthlyData> get monthlyData => _monthlyData;
@@ -532,10 +547,24 @@ class AppProvider extends ChangeNotifier {
   double get totalSpent => _campaigns.fold(0, (s, c) => s + c.spent);
   double get totalRevenue => _campaigns.fold(0, (s, c) => s + c.revenue);
   double get overallRoi => totalSpent > 0 ? ((totalRevenue - totalSpent) / totalSpent * 100) : 0;
-  double get avgKpiAchievement => _kpis.isEmpty ? 0 : _kpis.fold(0.0, (s, k) => s + k.achievementRate) / _kpis.length;
+  /// 현재 선택 팀 KPI 달성률 평균 (팀 없으면 전체 KPI)
+  double get avgKpiAchievement {
+    final list = _selectedTeamId != null ? currentTeamKpis : _kpis;
+    if (list.isEmpty) return 0;
+    return list.fold(0.0, (s, k) => s + k.achievementRate) / list.length;
+  }
   int get activeCampaigns => _campaigns.where((c) => c.status == 'active').length;
-  int get totalTasks => _projectStore.fold(0, (s, p) => s + p.tasks.length);
-  int get doneTasks => _projectStore.fold(0, (s, p) => s + p.tasks.where((t) => t.status == TaskStatus.done).length);
+  /// 현재 선택 팀 Task 수
+  int get totalTasks {
+    if (_selectedTeamId == null) return _projectStore.fold(0, (s, p) => s + p.tasks.length);
+    return _projectStore.where((p) => p.teamId == _selectedTeamId).fold(0, (s, p) => s + p.tasks.length);
+  }
+  int get doneTasks {
+    if (_selectedTeamId == null) {
+      return _projectStore.fold(0, (s, p) => s + p.tasks.where((t) => t.status == TaskStatus.done).length);
+    }
+    return _projectStore.where((p) => p.teamId == _selectedTeamId).fold(0, (s, p) => s + p.tasks.where((t) => t.status == TaskStatus.done).length);
+  }
 
   List<MonthlyKpiRecord> getMonthlyRecordsForKpi(String kpiId) =>
       _monthlyKpiRecords.where((r) => r.kpiId == kpiId).toList()
@@ -991,8 +1020,12 @@ class AppProvider extends ChangeNotifier {
 
   // ─── KPI CRUD ──────────────────────────────────────────────
   void addKpi(KpiModel kpi) {
-    _kpis.add(kpi);
-    if (_uid != null) _fs.saveKpi(_uid!, kpi);
+    // KPI에 teamId가 없으면 현재 선택된 팀으로 자동 설정
+    final kpiWithTeam = (kpi.teamId == null && _selectedTeamId != null)
+        ? kpi.copyWith(teamId: _selectedTeamId)
+        : kpi;
+    _kpis.add(kpiWithTeam);
+    if (_uid != null) _fs.saveKpi(_uid!, kpiWithTeam);
     notifyListeners();
   }
   void updateKpi(KpiModel updated) {
@@ -1006,6 +1039,31 @@ class AppProvider extends ChangeNotifier {
   void deleteKpi(String id) {
     _kpis.removeWhere((k) => k.id == id);
     if (_uid != null) _fs.deleteKpi(_uid!, id);
+    notifyListeners();
+  }
+
+  // ─── Task Delete ───────────────────────────────────────────
+  /// 태스크 단일 삭제
+  void deleteTask(String projectId, String taskId) {
+    final proj = _projectStore.firstWhere(
+      (p) => p.id == projectId,
+      orElse: () => _projectStore.isEmpty ? throw StateError('no projects') : _projectStore.first,
+    );
+    proj.tasks.removeWhere((t) => t.id == taskId);
+    if (_selectedTaskId == taskId) _selectedTaskId = null;
+    if (_uid != null) _fs.saveProject(_uid!, proj);
+    notifyListeners();
+  }
+
+  /// 태스크 일괄 삭제
+  void deleteTasksBulk(String projectId, List<String> taskIds) {
+    final proj = _projectStore.firstWhere(
+      (p) => p.id == projectId,
+      orElse: () => _projectStore.isEmpty ? throw StateError('no projects') : _projectStore.first,
+    );
+    proj.tasks.removeWhere((t) => taskIds.contains(t.id));
+    if (taskIds.contains(_selectedTaskId)) _selectedTaskId = null;
+    if (_uid != null) _fs.saveProject(_uid!, proj);
     notifyListeners();
   }
 
@@ -1477,13 +1535,13 @@ class AppProvider extends ChangeNotifier {
       KpiModel(id: 'kpi3', title: '신규 리드 수', category: '리드', target: 2000, current: 1650, unit: '건', period: 'Q1 2025', isTeamKpi: true, dueDate: DateTime(now.year, 3, 31), teamId: 'team1'),
       KpiModel(id: 'kpi4', title: '광고비 효율 (ROAS)', category: 'ROAS', target: 4.0, current: 3.6, unit: 'x', period: 'Q1 2025', isTeamKpi: true, dueDate: DateTime(now.year, 3, 31), teamId: 'team1'),
       KpiModel(id: 'kpi5', title: '캠페인 클릭률', category: 'CTR', target: 3.5, current: 3.2, unit: '%', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u2', dueDate: DateTime(now.year, 3, 31), teamId: 'team1'),
-      KpiModel(id: 'kpi6', title: '이메일 오픈율', category: '이메일', target: 25, current: 28.4, unit: '%', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u2', dueDate: DateTime(now.year, 3, 31)),
-      KpiModel(id: 'kpi7', title: '콘텐츠 조회수', category: '콘텐츠', target: 100000, current: 87500, unit: '회', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u3', dueDate: DateTime(now.year, 3, 31)),
-      KpiModel(id: 'kpi8', title: 'SNS 팔로워 증가', category: 'SNS', target: 5000, current: 4200, unit: '명', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u3', dueDate: DateTime(now.year, 3, 31)),
+      KpiModel(id: 'kpi6', title: '이메일 오픈율', category: '이메일', target: 25, current: 28.4, unit: '%', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u2', dueDate: DateTime(now.year, 3, 31), teamId: 'team1'),
+      KpiModel(id: 'kpi7', title: '콘텐츠 조회수', category: '콘텐츠', target: 100000, current: 87500, unit: '회', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u3', dueDate: DateTime(now.year, 3, 31), teamId: 'team1'),
+      KpiModel(id: 'kpi8', title: 'SNS 팔로워 증가', category: 'SNS', target: 5000, current: 4200, unit: '명', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u3', dueDate: DateTime(now.year, 3, 31), teamId: 'team1'),
       KpiModel(id: 'kpi9', title: '오가닉 트래픽', category: 'SEO', target: 50000, current: 43200, unit: '방문', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u4', dueDate: DateTime(now.year, 3, 31), teamId: 'team2'),
       KpiModel(id: 'kpi10', title: '키워드 상위 노출', category: 'SEO', target: 20, current: 17, unit: '개', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u4', dueDate: DateTime(now.year, 3, 31), teamId: 'team2'),
-      KpiModel(id: 'kpi11', title: 'CPA 목표', category: '광고', target: 15000, current: 18500, unit: '원', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u5', dueDate: DateTime(now.year, 3, 31)),
-      KpiModel(id: 'kpi12', title: '전환율', category: '전환', target: 5.0, current: 4.2, unit: '%', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u5', dueDate: DateTime(now.year, 3, 31)),
+      KpiModel(id: 'kpi11', title: 'CPA 목표', category: '광고', target: 15000, current: 18500, unit: '원', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u5', dueDate: DateTime(now.year, 3, 31), teamId: 'team2'),
+      KpiModel(id: 'kpi12', title: '전환율', category: '전환', target: 5.0, current: 4.2, unit: '%', period: 'Q1 2025', isTeamKpi: false, assignedTo: 'u5', dueDate: DateTime(now.year, 3, 31), teamId: 'team2'),
     ]);
   }
 

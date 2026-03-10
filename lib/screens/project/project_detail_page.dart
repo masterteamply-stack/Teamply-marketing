@@ -318,10 +318,56 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> with SingleTicker
 }
 
 // ── Task Board Tab ──────────────────────────────────────
-class _TaskBoardTab extends StatelessWidget {
+class _TaskBoardTab extends StatefulWidget {
   final AppProvider provider;
   final Project project;
   const _TaskBoardTab({required this.provider, required this.project});
+
+  @override
+  State<_TaskBoardTab> createState() => _TaskBoardTabState();
+}
+
+class _TaskBoardTabState extends State<_TaskBoardTab> {
+  final Set<String> _selectedIds = {};
+  bool _selectionMode = false;
+
+  void _toggleSelection(String taskId) {
+    setState(() {
+      if (_selectedIds.contains(taskId)) {
+        _selectedIds.remove(taskId);
+      } else {
+        _selectedIds.add(taskId);
+      }
+      _selectionMode = _selectedIds.isNotEmpty;
+    });
+  }
+
+  void _clearSelection() {
+    setState(() { _selectedIds.clear(); _selectionMode = false; });
+  }
+
+  Future<void> _deleteBulk() async {
+    if (_selectedIds.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        title: const Text('태스크 일괄 삭제', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+        content: Text('선택한 ${_selectedIds.length}개 태스크를 삭제하시겠습니까?',
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('취소', style: TextStyle(color: AppTheme.textMuted))),
+          TextButton(onPressed: () => Navigator.pop(context, true),
+              child: Text('${_selectedIds.length}개 삭제', style: const TextStyle(color: AppTheme.error))),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      widget.provider.deleteTasksBulk(widget.project.id, _selectedIds.toList());
+      _clearSelection();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -329,43 +375,89 @@ class _TaskBoardTab extends StatelessWidget {
     final labels = ['할 일', '진행 중', '검토 중', '완료'];
     final colors = [AppTheme.textMuted, AppTheme.info, AppTheme.warning, AppTheme.success];
 
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: statuses.asMap().entries.map((e) {
-          final tasks = project.tasks.where((t) => t.status == e.value).toList();
-          return Expanded(
-            child: Container(
-              margin: const EdgeInsets.only(right: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(color: colors[e.key].withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                    child: Row(children: [
-                      Container(width: 8, height: 8, decoration: BoxDecoration(color: colors[e.key], shape: BoxShape.circle)),
-                      const SizedBox(width: 8),
-                      Text(labels[e.key], style: TextStyle(color: colors[e.key], fontSize: 12, fontWeight: FontWeight.w600)),
-                      const Spacer(),
-                      Text('${tasks.length}', style: TextStyle(color: colors[e.key], fontSize: 12)),
-                    ]),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: tasks.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (_, i) => _TaskCard(task: tasks[i], provider: provider, project: project),
+    return Column(
+      children: [
+        // ── 일괄 선택 모드 액션바 ──────────────────────────
+        if (_selectionMode)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            color: AppTheme.bgCard,
+            child: Row(children: [
+              Text('${_selectedIds.length}개 선택됨',
+                  style: const TextStyle(color: AppTheme.mintPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              TextButton.icon(
+                icon: const Icon(Icons.delete_outline, size: 15, color: AppTheme.error),
+                label: const Text('삭제', style: TextStyle(color: AppTheme.error, fontSize: 12)),
+                onPressed: _deleteBulk,
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _clearSelection,
+                child: const Text('취소', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+              ),
+            ]),
+          ),
+        // ── 안내 텍스트 ────────────────────────────────────
+        if (!_selectionMode)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: Row(children: [
+              const Icon(Icons.info_outline, color: AppTheme.textMuted, size: 12),
+              const SizedBox(width: 4),
+              const Text('카드 길게 누르기: 선택 모드',
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+            ]),
+          ),
+        // ── 칸반 보드 ──────────────────────────────────────
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: statuses.asMap().entries.map((e) {
+                final tasks = widget.project.tasks.where((t) => t.status == e.value).toList();
+                return Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(color: colors[e.key].withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                          child: Row(children: [
+                            Container(width: 8, height: 8, decoration: BoxDecoration(color: colors[e.key], shape: BoxShape.circle)),
+                            const SizedBox(width: 8),
+                            Text(labels[e.key], style: TextStyle(color: colors[e.key], fontSize: 12, fontWeight: FontWeight.w600)),
+                            const Spacer(),
+                            Text('${tasks.length}', style: TextStyle(color: colors[e.key], fontSize: 12)),
+                          ]),
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: ListView.separated(
+                            itemCount: tasks.length,
+                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                            itemBuilder: (_, i) => _TaskCard(
+                              task: tasks[i],
+                              provider: widget.provider,
+                              project: widget.project,
+                              isSelected: _selectedIds.contains(tasks[i].id),
+                              onLongPress: () => _toggleSelection(tasks[i].id),
+                              onToggleSelect: _selectionMode ? () => _toggleSelection(tasks[i].id) : null,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                );
+              }).toList(),
             ),
-          );
-        }).toList(),
-      ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -374,7 +466,17 @@ class _TaskCard extends StatelessWidget {
   final TaskDetail task;
   final AppProvider provider;
   final Project project;
-  const _TaskCard({required this.task, required this.provider, required this.project});
+  final bool isSelected;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onToggleSelect;
+  const _TaskCard({
+    required this.task,
+    required this.provider,
+    required this.project,
+    this.isSelected = false,
+    this.onLongPress,
+    this.onToggleSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -388,20 +490,34 @@ class _TaskCard extends StatelessWidget {
     final checkTotal = task.checklist.length;
     final daysLeft = task.dueDate != null ? task.dueDate!.difference(DateTime.now()).inDays : null;
 
-    return InkWell(
-      onTap: () => provider.selectTask(task.id),
-      borderRadius: BorderRadius.circular(10),
+    return GestureDetector(
+      onLongPress: onLongPress,
+      onTap: onToggleSelect ?? () => provider.selectTask(task.id),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppTheme.bgCard,
+          color: isSelected ? AppTheme.mintPrimary.withValues(alpha: 0.12) : AppTheme.bgCard,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: task.isOverdue ? AppTheme.error.withValues(alpha: 0.4) : const Color(0xFF1E3040)),
+          border: Border.all(
+            color: isSelected ? AppTheme.mintPrimary.withValues(alpha: 0.6)
+                : task.isOverdue ? AppTheme.error.withValues(alpha: 0.4)
+                : const Color(0xFF1E3040),
+            width: isSelected ? 1.5 : 1,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
+              // 선택 모드 체크박스
+              if (onToggleSelect != null) ...[
+                Icon(
+                  isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                  color: isSelected ? AppTheme.mintPrimary : AppTheme.textMuted,
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+              ],
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(color: prColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
@@ -500,6 +616,38 @@ class _TaskCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Icon(Icons.edit_rounded, color: AppTheme.mintPrimary, size: 12),
+                ),
+              ),
+              const SizedBox(width: 4),
+              // 삭제 버튼
+              GestureDetector(
+                onTap: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      backgroundColor: AppTheme.bgCard,
+                      title: const Text('태스크 삭제', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+                      content: Text('"${task.title}" 태스크를 삭제하시겠습니까?',
+                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false),
+                            child: const Text('취소', style: TextStyle(color: AppTheme.textMuted))),
+                        TextButton(onPressed: () => Navigator.pop(context, true),
+                            child: const Text('삭제', style: TextStyle(color: AppTheme.error))),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true) {
+                    provider.deleteTask(project.id, task.id);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.error.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Icon(Icons.delete_outline_rounded, color: AppTheme.error, size: 12),
                 ),
               ),
               const SizedBox(width: 6),

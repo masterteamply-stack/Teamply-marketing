@@ -34,8 +34,24 @@ class OverviewPage extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('마케팅 대시보드',
-                            style: TextStyle(color: AppTheme.textPrimary, fontSize: 24, fontWeight: FontWeight.w700)),
+                        Row(children: [
+                          const Text('마케팅 대시보드',
+                              style: TextStyle(color: AppTheme.textPrimary, fontSize: 24, fontWeight: FontWeight.w700)),
+                          if (provider.selectedTeam != null) ...[
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: AppTheme.mintPrimary.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                provider.selectedTeam!.iconEmoji + ' ' + provider.selectedTeam!.name,
+                                style: const TextStyle(color: AppTheme.mintPrimary, fontSize: 12, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                          ],
+                        ]),
                         const SizedBox(height: 4),
                         Text(_periodLabel(provider),
                             style: const TextStyle(color: AppTheme.textMuted, fontSize: 13)),
@@ -632,7 +648,9 @@ class _KpiAchievementList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final kpis = provider.kpis.take(6).toList();
+    final kpis = provider.currentTeamKpis.isEmpty
+        ? provider.kpis.take(6).toList()
+        : provider.currentTeamKpis.take(6).toList();
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(14)),
