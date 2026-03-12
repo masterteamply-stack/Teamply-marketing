@@ -1,94 +1,65 @@
-// lib/models/team_member.dart
+/// lib/models/team_member.dart
+/// 마케팅 대시보드 담당자 모델
 
-import 'package:hive/hive.dart';
-import 'package:uuid/uuid.dart';
-
-part 'team_member.g.dart';
-
-@HiveType(typeId: 10)
-class TeamMember extends HiveObject {
-  @HiveField(0)
+class TeamMember {
   final String id;
-
-  @HiveField(1)
   final String name;
-
-  @HiveField(2)
-  final String role;
-
-  @HiveField(3)
-  final String department;
-
-  @HiveField(4)
-  final DateTime createdAt;
-
-  @HiveField(5)
-  final bool isActive;
-
-  @HiveField(6)
-  final String teamId;
+  final String role;           // 직책/역할 (예: 콘텐츠 마케터)
+  final String department;     // 부서 (예: 마케팅팀)
+  final String? avatarUrl;     // 프로필 사진 URL (선택사항)
+  final DateTime createdAt;    // 생성 날짜
+  final bool isActive;         // 활성 상태
 
   TeamMember({
-    String? id,
+    required this.id,
     required this.name,
     required this.role,
     required this.department,
-    DateTime? createdAt,
+    this.avatarUrl,
+    required this.createdAt,
     this.isActive = true,
-    required this.teamId,
-  })  : id = id ?? const Uuid().v4(),
-        createdAt = createdAt ?? DateTime.now();
+  });
 
-  /// Firestore JSON to Model
-  factory TeamMember.fromFirestore(Map<String, dynamic> json) {
-    return TeamMember(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      role: json['role'] as String? ?? '',
-      department: json['department'] as String? ?? '',
-      createdAt: json['createdAt'] != null
-          ? DateTime.parse(json['createdAt'] as String)
-          : DateTime.now(),
-      isActive: json['isActive'] as bool? ?? true,
-      teamId: json['teamId'] as String? ?? '',
-    );
-  }
-
-  /// Model to Firestore JSON
-  Map<String, dynamic> toFirestore() => {
+  /// JSON으로 직렬화 (Firestore 저장용)
+  Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
     'role': role,
     'department': department,
+    'avatarUrl': avatarUrl,
     'createdAt': createdAt.toIso8601String(),
     'isActive': isActive,
-    'teamId': teamId,
   };
 
-  /// 데이터 복사 및 수정
+  /// JSON에서 역직렬화
+  factory TeamMember.fromJson(Map<String, dynamic> json) => TeamMember(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    role: json['role'] as String,
+    department: json['department'] as String,
+    avatarUrl: json['avatarUrl'] as String?,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+    isActive: json['isActive'] as bool? ?? true,
+  );
+
+  /// 데이터 업데이트용 copyWith 메서드
   TeamMember copyWith({
     String? id,
     String? name,
     String? role,
     String? department,
+    String? avatarUrl,
     DateTime? createdAt,
     bool? isActive,
-    String? teamId,
-  }) {
-    return TeamMember(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      role: role ?? this.role,
-      department: department ?? this.department,
-      createdAt: createdAt ?? this.createdAt,
-      isActive: isActive ?? this.isActive,
-      teamId: teamId ?? this.teamId,
-    );
-  }
-
-  @override
-  String toString() =>
-      'TeamMember(id: $id, name: $name, role: $role, department: $department)';
+  }) => TeamMember(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    role: role ?? this.role,
+    department: department ?? this.department,
+    avatarUrl: avatarUrl ?? this.avatarUrl,
+    createdAt: createdAt ?? this.createdAt,
+    isActive: isActive ?? this.isActive,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -103,4 +74,8 @@ class TeamMember extends HiveObject {
   @override
   int get hashCode =>
       id.hashCode ^ name.hashCode ^ role.hashCode ^ department.hashCode;
+
+  @override
+  String toString() =>
+      'TeamMember(id: $id, name: $name, role: $role, department: $department)';
 }
