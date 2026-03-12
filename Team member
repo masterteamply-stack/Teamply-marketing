@@ -1,0 +1,106 @@
+// lib/models/team_member.dart
+
+import 'package:hive/hive.dart';
+import 'package:uuid/uuid.dart';
+
+part 'team_member.g.dart';
+
+@HiveType(typeId: 10)
+class TeamMember extends HiveObject {
+  @HiveField(0)
+  final String id;
+
+  @HiveField(1)
+  final String name;
+
+  @HiveField(2)
+  final String role;
+
+  @HiveField(3)
+  final String department;
+
+  @HiveField(4)
+  final DateTime createdAt;
+
+  @HiveField(5)
+  final bool isActive;
+
+  @HiveField(6)
+  final String teamId;
+
+  TeamMember({
+    String? id,
+    required this.name,
+    required this.role,
+    required this.department,
+    DateTime? createdAt,
+    this.isActive = true,
+    required this.teamId,
+  })  : id = id ?? const Uuid().v4(),
+        createdAt = createdAt ?? DateTime.now();
+
+  /// Firestore JSON to Model
+  factory TeamMember.fromFirestore(Map<String, dynamic> json) {
+    return TeamMember(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      role: json['role'] as String? ?? '',
+      department: json['department'] as String? ?? '',
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'] as String)
+          : DateTime.now(),
+      isActive: json['isActive'] as bool? ?? true,
+      teamId: json['teamId'] as String? ?? '',
+    );
+  }
+
+  /// Model to Firestore JSON
+  Map<String, dynamic> toFirestore() => {
+    'id': id,
+    'name': name,
+    'role': role,
+    'department': department,
+    'createdAt': createdAt.toIso8601String(),
+    'isActive': isActive,
+    'teamId': teamId,
+  };
+
+  /// 데이터 복사 및 수정
+  TeamMember copyWith({
+    String? id,
+    String? name,
+    String? role,
+    String? department,
+    DateTime? createdAt,
+    bool? isActive,
+    String? teamId,
+  }) {
+    return TeamMember(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      role: role ?? this.role,
+      department: department ?? this.department,
+      createdAt: createdAt ?? this.createdAt,
+      isActive: isActive ?? this.isActive,
+      teamId: teamId ?? this.teamId,
+    );
+  }
+
+  @override
+  String toString() =>
+      'TeamMember(id: $id, name: $name, role: $role, department: $department)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TeamMember &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          role == other.role &&
+          department == other.department;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ name.hashCode ^ role.hashCode ^ department.hashCode;
+}
