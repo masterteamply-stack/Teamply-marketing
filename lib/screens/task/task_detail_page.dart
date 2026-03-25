@@ -23,7 +23,7 @@ class _TaskDetailPageState extends State<TaskDetailPage> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 7, vsync: this);
+    _tab = TabController(length: 6, vsync: this);
   }
 
   @override
@@ -150,18 +150,57 @@ class _TaskDetailPageState extends State<TaskDetailPage> with SingleTickerProvid
                   labelColor: AppTheme.mintPrimary,
                   unselectedLabelColor: AppTheme.textMuted,
                   indicatorColor: AppTheme.mintPrimary,
+                  labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                   tabs: [
-                    const Tab(text: '체크리스트'),
-                    const Tab(text: '일정 & 멘션'),
-                    const Tab(text: '비용 관리'),
-                    const Tab(text: 'KPI 트래커'),
-                    const Tab(text: '코멘트'),
+                    const Tab(text: '📋 상세정보 & 전략'),
                     Tab(
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('첨부파일'),
-                          if (task.attachments.isNotEmpty) ...[  
+                          const Text('✅ 체크리스트 & 일정'),
+                          if (task.checklist.isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: task.checklistProgress >= 100 ? AppTheme.success : AppTheme.mintPrimary,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text('${task.checklist.where((c) => c.isDone).length}/${task.checklist.length}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('💬 코멘트'),
+                          if (task.comments.isNotEmpty) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: AppTheme.mintPrimary,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text('${task.comments.length}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const Tab(text: '💰 비용 관리'),
+                    const Tab(text: '📊 KPI 트래커'),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('📎 첨부파일'),
+                          if (task.attachments.isNotEmpty) ...[
                             const SizedBox(width: 4),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -176,7 +215,6 @@ class _TaskDetailPageState extends State<TaskDetailPage> with SingleTickerProvid
                         ],
                       ),
                     ),
-                    Tab(text: '상세 정보'),
                   ],
                 ),
               ],
@@ -186,13 +224,12 @@ class _TaskDetailPageState extends State<TaskDetailPage> with SingleTickerProvid
             child: TabBarView(
               controller: _tab,
               children: [
-                _ChecklistTab(task: task, provider: provider, project: project),
-                _ScheduleMentionTab(task: task, provider: provider, project: project),
+                _InfoTab(task: task, provider: provider, project: project),
+                _ChecklistScheduleTab(task: task, provider: provider, project: project),
+                _CommentTab(task: task, provider: provider, project: project),
                 _CostTab(task: task, provider: provider, project: project),
                 _KpiTrackerTab(task: task, provider: provider, project: project),
-                _CommentTab(task: task, provider: provider, project: project),
                 TaskAttachmentTab(task: task, provider: provider, project: project),
-                _InfoTab(task: task, provider: provider, project: project),
               ],
             ),
           ),
@@ -3049,56 +3086,456 @@ class _CostEntryTile extends StatelessWidget {
 
 
 // ── Info Tab ───────────────────────────────────────────
-class _InfoTab extends StatelessWidget {
+
+// ════════════════════════════════════════════════════════
+// 상세 정보 탭 - 전략연결, 대상 권역/국가/고객, 기본 정보
+// ════════════════════════════════════════════════════════
+class _InfoTab extends StatefulWidget {
   final TaskDetail task;
   final AppProvider provider;
   final Project? project;
   const _InfoTab({required this.task, required this.provider, required this.project});
+  @override
+  State<_InfoTab> createState() => _InfoTabState();
+}
+
+class _InfoTabState extends State<_InfoTab> {
+  @override
+  Widget build(BuildContext context) {
+    final task = widget.task;
+    final provider = widget.provider;
+    final dfmt = DateFormat('yyyy.MM.dd HH:mm');
+    final isMobile = MediaQuery.of(context).size.width < 768;
+    final teamKpis = provider.currentTeamKpis;
+    final campaigns = provider.teamCampaigns;
+    final regions = provider.regions;
+    final clients = provider.clients;
+    final fw = provider.selectedTeamId != null ? provider.getFrameworkForTeam(provider.selectedTeamId!) : null;
+    final allDeliverables = fw?.allDeliverables ?? [];
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(isMobile ? 14 : 24),
+      child: isMobile
+          ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _buildStrategySection(context, task, provider, fw, allDeliverables, campaigns, teamKpis),
+              const SizedBox(height: 16),
+              _buildTargetSection(context, task, provider, regions, clients, isMobile),
+              const SizedBox(height: 16),
+              _buildBasicInfoSection(task, dfmt),
+            ])
+          : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(flex: 3, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _buildStrategySection(context, task, provider, fw, allDeliverables, campaigns, teamKpis),
+                const SizedBox(height: 16),
+                _buildTargetSection(context, task, provider, regions, clients, isMobile),
+              ])),
+              const SizedBox(width: 20),
+              Expanded(flex: 2, child: _buildBasicInfoSection(task, dfmt)),
+            ]),
+    );
+  }
+
+  Widget _buildStrategySection(BuildContext context, TaskDetail task, AppProvider provider,
+      StrategyFramework? fw, List<StrategyDeliverable> allDeliverables,
+      List<CampaignModel> campaigns, List<KpiModel> teamKpis) {
+    StrategyObjective? linkedObjective;
+    StrategyAction? linkedAction;
+    StrategyDeliverable? linkedDeliverable;
+    if (fw != null && task.deliverableId != null) {
+      for (final obj in fw.objectives) {
+        for (final act in obj.actions) {
+          for (final d in act.deliverables) {
+            if (d.id == task.deliverableId) {
+              linkedObjective = obj; linkedAction = act; linkedDeliverable = d;
+            }
+          }
+        }
+      }
+    }
+    final linkedCampaign = task.campaignId != null ? campaigns.where((c) => c.id == task.campaignId).firstOrNull : null;
+    final linkedKpi = task.kpiId != null ? teamKpis.where((k) => k.id == task.kpiId).firstOrNull : null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF1E3040))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.account_tree_outlined, color: AppTheme.mintPrimary, size: 18),
+          const SizedBox(width: 8),
+          const Text('전략 연결', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          InkWell(
+            onTap: () => _showStrategyEditDialog(context, task, provider, fw, allDeliverables, campaigns, teamKpis),
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(color: AppTheme.mintPrimary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.mintPrimary.withValues(alpha: 0.3))),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.edit_outlined, color: AppTheme.mintPrimary, size: 12), SizedBox(width: 4), Text('편집', style: TextStyle(color: AppTheme.mintPrimary, fontSize: 11))]),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 14),
+        if (linkedObjective != null) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: AppTheme.bgCardLight, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF1E3040))),
+            child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 0, runSpacing: 6, children: [
+              if (fw != null) ...[_BreadCrumbChip(fw.iconEmoji + ' ' + fw.name, AppTheme.mintPrimary), const Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 14)],
+              _BreadCrumbChip(linkedObjective.name, _hexColor(linkedObjective.colorHex)), const Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 14),
+              if (linkedAction != null) ...[_BreadCrumbChip(linkedAction.name, AppTheme.info), const Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 14)],
+              if (linkedDeliverable != null) _BreadCrumbChip(linkedDeliverable.name, AppTheme.warning),
+            ]),
+          ),
+          const SizedBox(height: 10),
+        ] else
+          const Text('전략 연결 없음', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+        if (linkedCampaign != null || linkedKpi != null) ...[
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            if (linkedCampaign != null) _LinkTagChip(icon: Icons.campaign_outlined, label: linkedCampaign.name, color: AppTheme.info, onTap: () { provider.selectCampaign(linkedCampaign.id); provider.navigateTo('campaign'); }),
+            if (linkedKpi != null) _LinkTagChip(icon: Icons.track_changes, label: linkedKpi.title, color: AppTheme.mintPrimary, onTap: () => provider.navigateTo('kpi')),
+          ]),
+        ],
+        if (task.pillar != null) ...[const SizedBox(height: 10), _InfoRow(label: '전략 Pillar', value: task.pillar!.name.toUpperCase())],
+      ]),
+    );
+  }
+
+  Widget _buildTargetSection(BuildContext context, TaskDetail task, AppProvider provider, List<MarketingRegion> regions, List<ClientAccount> clients, bool isMobile) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF1E3040))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.public, color: AppTheme.warning, size: 18),
+          const SizedBox(width: 8),
+          const Text('대상 권역 & 고객', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          InkWell(
+            onTap: () => _showTargetEditDialog(context, task, provider, regions, clients),
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(color: AppTheme.warning.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.warning.withValues(alpha: 0.3))),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.edit_outlined, color: AppTheme.warning, size: 12), SizedBox(width: 4), Text('편집', style: TextStyle(color: AppTheme.warning, fontSize: 11))]),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 14),
+        if (task.targetRegions.isNotEmpty) ...[
+          const Text('대상 권역', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)), const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 4, children: task.targetRegions.map((r) => _SmallChip(label: '🌏 $r', color: AppTheme.info)).toList()), const SizedBox(height: 10),
+        ],
+        if (task.targetCountries.isNotEmpty) ...[
+          const Text('대상 국가', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)), const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 4, children: task.targetCountries.map((c) => _SmallChip(label: '🏳 $c', color: AppTheme.mintPrimary)).toList()), const SizedBox(height: 10),
+        ],
+        if (task.targetClientIds.isNotEmpty) ...[
+          const Text('연결 고객사', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)), const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 4, children: task.targetClientIds.map((id) {
+            final client = clients.where((c) => c.id == id).firstOrNull;
+            return _SmallChip(label: '🏢 ${client?.name ?? id}', color: AppTheme.warning);
+          }).toList()),
+        ],
+        if (task.targetRegions.isEmpty && task.targetCountries.isEmpty && task.targetClientIds.isEmpty)
+          const Text('대상 권역/국가/고객 미설정', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+      ]),
+    );
+  }
+
+  Widget _buildBasicInfoSection(TaskDetail task, DateFormat dfmt) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF1E3040))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [Icon(Icons.info_outline, color: AppTheme.textSecondary, size: 18), SizedBox(width: 8), Text('태스크 정보', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700))]),
+        const SizedBox(height: 14),
+        _InfoRow(label: '생성일', value: dfmt.format(task.createdAt)),
+        _InfoRow(label: '최종 수정', value: dfmt.format(task.updatedAt)),
+        if (task.startDate != null) _InfoRow(label: '시작일', value: DateFormat('yyyy.MM.dd').format(task.startDate!)),
+        if (task.dueDate != null) _InfoRow(label: '마감일', value: DateFormat('yyyy.MM.dd').format(task.dueDate!)),
+        if (task.externalId != null) _InfoRow(label: '외부 ID', value: task.externalId!),
+        if (task.year != null) _InfoRow(label: '대상 연도', value: '${task.year}년'),
+        if (task.target != null) _InfoRow(label: '목표값', value: '${task.target!.toStringAsFixed(0)}${task.unit ?? ''}'),
+        if (task.theme != null) _InfoRow(label: '테마', value: task.theme!),
+        if (task.ownerName != null) _InfoRow(label: '담당자명', value: task.ownerName!),
+        if (task.defaultRegion != null) _InfoRow(label: '기본 권역', value: task.defaultRegion!),
+        if (task.defaultCountry != null) _InfoRow(label: '기본 국가', value: task.defaultCountry!),
+        if (task.tags.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          const Text('태그', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)), const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 4, children: task.tags.map((t) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: AppTheme.bgCardLight, borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.mintPrimary.withValues(alpha: 0.3))),
+            child: Text('#$t', style: const TextStyle(color: AppTheme.mintPrimary, fontSize: 11)),
+          )).toList()),
+        ],
+      ]),
+    );
+  }
+
+  Color _hexColor(String hex) {
+    try { return Color(int.parse('0xFF${hex.replaceAll('#', '')}')); } catch (_) { return AppTheme.mintPrimary; }
+  }
+
+  void _showStrategyEditDialog(BuildContext context, TaskDetail task, AppProvider provider, StrategyFramework? fw, List<StrategyDeliverable> deliverables, List<CampaignModel> campaigns, List<KpiModel> kpis) {
+    String? selDeliverableId = task.deliverableId;
+    String? selCampaignId = task.campaignId;
+    String? selKpiId = task.kpiId;
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(builder: (ctx, setSt) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('전략 연결 편집', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+        content: SizedBox(width: 480, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Deliverable 연결', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)), const SizedBox(height: 6),
+          DropdownButtonFormField<String?>(
+            value: selDeliverableId, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13), dropdownColor: AppTheme.bgCard,
+            decoration: InputDecoration(hintText: 'Deliverable 선택', hintStyle: const TextStyle(color: AppTheme.textMuted), filled: true, fillColor: AppTheme.bgCardLight, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF1E3040))), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            items: [const DropdownMenuItem(value: null, child: Text('없음', style: TextStyle(color: AppTheme.textMuted))), ...deliverables.map((d) => DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis)))],
+            onChanged: (v) => setSt(() => selDeliverableId = v),
+          ),
+          const SizedBox(height: 14),
+          const Text('캠페인 연결', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)), const SizedBox(height: 6),
+          DropdownButtonFormField<String?>(
+            value: selCampaignId, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13), dropdownColor: AppTheme.bgCard,
+            decoration: InputDecoration(hintText: '캠페인 선택', hintStyle: const TextStyle(color: AppTheme.textMuted), filled: true, fillColor: AppTheme.bgCardLight, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF1E3040))), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            items: [const DropdownMenuItem(value: null, child: Text('없음', style: TextStyle(color: AppTheme.textMuted))), ...campaigns.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)))],
+            onChanged: (v) => setSt(() => selCampaignId = v),
+          ),
+          const SizedBox(height: 14),
+          const Text('KPI 연결', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)), const SizedBox(height: 6),
+          DropdownButtonFormField<String?>(
+            value: selKpiId, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13), dropdownColor: AppTheme.bgCard,
+            decoration: InputDecoration(hintText: 'KPI 선택', hintStyle: const TextStyle(color: AppTheme.textMuted), filled: true, fillColor: AppTheme.bgCardLight, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF1E3040))), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            items: [const DropdownMenuItem(value: null, child: Text('없음', style: TextStyle(color: AppTheme.textMuted))), ...kpis.map((k) => DropdownMenuItem(value: k.id, child: Text(k.title, overflow: TextOverflow.ellipsis)))],
+            onChanged: (v) => setSt(() => selKpiId = v),
+          ),
+        ]))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소', style: TextStyle(color: AppTheme.textMuted))),
+          ElevatedButton(
+            onPressed: () {
+              String? objId, actId;
+              if (fw != null && selDeliverableId != null) {
+                for (final obj in fw.objectives) {
+                  for (final act in obj.actions) {
+                    if (act.deliverables.any((d) => d.id == selDeliverableId)) { objId = obj.id; actId = act.id; }
+                  }
+                }
+              }
+              task.deliverableId = selDeliverableId;
+              task.campaignId = selCampaignId;
+              task.kpiId = selKpiId;
+              task.strategyFrameworkId = fw?.id;
+              task.strategyObjectiveId = objId;
+              task.strategyActionId = actId;
+              if (widget.project != null) provider.updateTask(widget.project!.id, task);
+              Navigator.pop(ctx);
+              setState(() {});
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.mintPrimary),
+            child: const Text('저장', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      )),
+    );
+  }
+
+  void _showTargetEditDialog(BuildContext context, TaskDetail task, AppProvider provider, List<MarketingRegion> regions, List<ClientAccount> clients) {
+    final selRegions = List<String>.from(task.targetRegions);
+    final selCountries = List<String>.from(task.targetCountries);
+    final selClientIds = List<String>.from(task.targetClientIds);
+    final countryCtrl = TextEditingController();
+    const fixedRegions = ['동남아', '중동', '유럽', '북미', '남미', '아프리카', '남아시아', '동아시아', '오세아니아', '중앙아시아'];
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(builder: (ctx, setSt) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('대상 권역 & 고객 편집', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+        content: SizedBox(width: 480, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('대상 권역', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)), const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 4, children: [
+            ...fixedRegions.map((r) => FilterChip(
+              label: Text(r, style: TextStyle(color: selRegions.contains(r) ? Colors.white : AppTheme.textSecondary, fontSize: 11)),
+              selected: selRegions.contains(r), onSelected: (v) => setSt(() => v ? selRegions.add(r) : selRegions.remove(r)),
+              selectedColor: AppTheme.info, backgroundColor: AppTheme.bgCardLight, checkmarkColor: Colors.white,
+              side: BorderSide(color: selRegions.contains(r) ? AppTheme.info : const Color(0xFF1E3040)), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            )),
+            ...regions.where((r) => !fixedRegions.contains(r.name)).map((r) => FilterChip(
+              label: Text(r.name, style: TextStyle(color: selRegions.contains(r.name) ? Colors.white : AppTheme.textSecondary, fontSize: 11)),
+              selected: selRegions.contains(r.name), onSelected: (v) => setSt(() => v ? selRegions.add(r.name) : selRegions.remove(r.name)),
+              selectedColor: AppTheme.info, backgroundColor: AppTheme.bgCardLight, checkmarkColor: Colors.white,
+              side: BorderSide(color: selRegions.contains(r.name) ? AppTheme.info : const Color(0xFF1E3040)), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            )),
+          ]),
+          const SizedBox(height: 14),
+          const Text('대상 국가', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)), const SizedBox(height: 6),
+          if (selCountries.isNotEmpty) ...[
+            Wrap(spacing: 6, runSpacing: 4, children: selCountries.map((c) => Chip(
+              label: Text(c, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 11)),
+              onDeleted: () => setSt(() => selCountries.remove(c)),
+              deleteIconColor: AppTheme.textMuted, backgroundColor: AppTheme.bgCardLight,
+              side: const BorderSide(color: Color(0xFF1E3040)), padding: const EdgeInsets.symmetric(horizontal: 4),
+            )).toList()), const SizedBox(height: 6),
+          ],
+          Row(children: [
+            Expanded(child: TextField(
+              controller: countryCtrl,
+              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+              decoration: InputDecoration(hintText: '국가 입력 (예: KR, SG)', hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 12), filled: true, fillColor: AppTheme.bgCardLight, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF1E3040))), contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+            )),
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: () { if (countryCtrl.text.trim().isNotEmpty && !selCountries.contains(countryCtrl.text.trim())) { setSt(() => selCountries.add(countryCtrl.text.trim())); countryCtrl.clear(); } },
+              icon: const Icon(Icons.add_circle, color: AppTheme.mintPrimary, size: 24),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          const Text('연결 고객사', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)), const SizedBox(height: 6),
+          clients.isEmpty ? const Text('등록된 고객사 없음', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)) :
+          Wrap(spacing: 6, runSpacing: 4, children: clients.map((c) => FilterChip(
+            label: Text(c.name, style: TextStyle(color: selClientIds.contains(c.id) ? Colors.white : AppTheme.textSecondary, fontSize: 11)),
+            selected: selClientIds.contains(c.id), onSelected: (v) => setSt(() => v ? selClientIds.add(c.id) : selClientIds.remove(c.id)),
+            selectedColor: AppTheme.warning, backgroundColor: AppTheme.bgCardLight, checkmarkColor: Colors.white,
+            side: BorderSide(color: selClientIds.contains(c.id) ? AppTheme.warning : const Color(0xFF1E3040)), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          )).toList()),
+        ]))),
+        actions: [
+          TextButton(onPressed: () { countryCtrl.dispose(); Navigator.pop(ctx); }, child: const Text('취소', style: TextStyle(color: AppTheme.textMuted))),
+          ElevatedButton(
+            onPressed: () {
+              task.targetRegions.clear(); task.targetRegions.addAll(selRegions);
+              task.targetCountries.clear(); task.targetCountries.addAll(selCountries);
+              task.targetClientIds.clear(); task.targetClientIds.addAll(selClientIds);
+              if (widget.project != null) provider.updateTask(widget.project!.id, task);
+              countryCtrl.dispose(); Navigator.pop(ctx);
+              setState(() {});
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.mintPrimary),
+            child: const Text('저장', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      )),
+    );
+  }
+}
+
+// ── 브레드크럼 칩 ─────────────────────────────────────────
+class _BreadCrumbChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _BreadCrumbChip(this.label, this.color);
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+    child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+  );
+}
+
+// ── 링크 태그 칩 ──────────────────────────────────────────
+class _LinkTagChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+  const _LinkTagChip({required this.icon, required this.label, required this.color, this.onTap});
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(8),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withValues(alpha: 0.35))),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: color, size: 12), const SizedBox(width: 5),
+        Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+        if (onTap != null) ...[const SizedBox(width: 4), Icon(Icons.open_in_new, color: color.withValues(alpha: 0.6), size: 10)],
+      ]),
+    ),
+  );
+}
+
+// ── 소형 칩 ───────────────────────────────────────────────
+class _SmallChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _SmallChip({required this.label, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: color.withValues(alpha: 0.3))),
+    child: Text(label, style: TextStyle(color: color, fontSize: 11)),
+  );
+}
+
+// ── 정보 행 ───────────────────────────────────────────────
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool mono;
+  const _InfoRow({required this.label, required this.value, this.mono = false});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(children: [
+      SizedBox(width: 90, child: Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11))),
+      Expanded(child: Text(value, style: TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontFamily: mono ? 'monospace' : null))),
+    ]),
+  );
+}
+
+// ── 체크리스트 + 일정 통합 탭 ────────────────────────────
+class _ChecklistScheduleTab extends StatefulWidget {
+  final TaskDetail task;
+  final AppProvider provider;
+  final Project? project;
+  const _ChecklistScheduleTab({required this.task, required this.provider, required this.project});
+  @override
+  State<_ChecklistScheduleTab> createState() => _ChecklistScheduleTabState();
+}
+
+class _ChecklistScheduleTabState extends State<_ChecklistScheduleTab> with SingleTickerProviderStateMixin {
+  late TabController _tab;
+
+  @override
+  void initState() { super.initState(); _tab = TabController(length: 2, vsync: this); }
+
+  @override
+  void dispose() { _tab.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
-    final dfmt = DateFormat('yyyy.MM.dd HH:mm');
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('태스크 정보', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 16),
-                _InfoField(label: '태스크 ID', value: task.id),
-                _InfoField(label: '생성일', value: dfmt.format(task.createdAt)),
-                _InfoField(label: '최종 수정', value: dfmt.format(task.updatedAt)),
-                if (task.startDate != null) _InfoField(label: '시작일', value: DateFormat('yyyy.MM.dd').format(task.startDate!)),
-                if (task.dueDate != null) _InfoField(label: '마감일', value: DateFormat('yyyy.MM.dd').format(task.dueDate!)),
-                if (task.kpiId != null) _InfoField(label: '연관 KPI', value: task.kpiId!),
-                // ── CSV 가져오기 확장 필드 ──────────────────
-                if (task.externalId != null) _InfoField(label: '외부 ID', value: task.externalId!),
-                if (task.year != null) _InfoField(label: '대상 연도', value: '${task.year}년'),
-                if (task.target != null) _InfoField(
-                  label: '목표값',
-                  value: '${task.target!.toStringAsFixed(task.target!.truncateToDouble() == task.target! ? 0 : 1)}'
-                      '${task.unit != null ? ' ${task.unit}' : ''}',
-                ),
-                if (task.theme != null) _InfoField(label: '테마', value: task.theme!),
-                if (task.ownerName != null) _InfoField(label: '담당자명', value: task.ownerName!),
-                const SizedBox(height: 16),
-                const Text('태그', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                const SizedBox(height: 8),
-                Wrap(spacing: 8, runSpacing: 6, children: task.tags.map((t) => Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(color: AppTheme.bgCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppTheme.mintPrimary.withValues(alpha: 0.3))),
-                  child: Text('#$t', style: const TextStyle(color: AppTheme.mintPrimary, fontSize: 12)),
-                )).toList()),
-              ],
-            ),
-          ),
-        ],
+    final task = widget.task; final provider = widget.provider; final project = widget.project;
+    return Column(children: [
+      Container(
+        color: AppTheme.bgCard,
+        child: TabBar(
+          controller: _tab, labelColor: AppTheme.mintPrimary, unselectedLabelColor: AppTheme.textMuted,
+          indicatorColor: AppTheme.mintPrimary, indicatorSize: TabBarIndicatorSize.label,
+          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          tabs: [
+            Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Text('✅ 체크리스트'),
+              if (task.checklist.isNotEmpty) ...[const SizedBox(width: 6), Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(color: task.checklistProgress >= 100 ? AppTheme.success : AppTheme.mintPrimary, borderRadius: BorderRadius.circular(8)),
+                child: Text('${task.checklist.where((c) => c.isDone).length}/${task.checklist.length}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
+              )],
+            ])),
+            const Tab(text: '📅 일정 & 멘션'),
+          ],
+        ),
       ),
-    );
+      Expanded(child: TabBarView(controller: _tab, children: [
+        _ChecklistTab(task: task, provider: provider, project: project),
+        _ScheduleMentionTab(task: task, provider: provider, project: project),
+      ])),
+    ]);
   }
 }
 

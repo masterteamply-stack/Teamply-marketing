@@ -39,6 +39,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get continueWithWhatsApp => '通过WhatsApp继续';
 
   @override
+  String get continueWithMicrosoft => '通过Microsoft继续';
+
+  @override
+  String get continueWithApple => '通过Apple继续';
+
+  @override
   String get continueWithEmail => '通过邮箱继续';
 
   @override

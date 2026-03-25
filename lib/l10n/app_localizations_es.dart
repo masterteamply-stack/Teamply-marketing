@@ -39,6 +39,12 @@ class AppLocalizationsEs extends AppLocalizations {
   String get continueWithWhatsApp => 'Continuar con WhatsApp';
 
   @override
+  String get continueWithMicrosoft => 'Continuar con Microsoft';
+
+  @override
+  String get continueWithApple => 'Continuar con Apple';
+
+  @override
   String get continueWithEmail => 'Continuar con correo';
 
   @override

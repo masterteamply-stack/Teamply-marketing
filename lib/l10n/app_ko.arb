@@ -10,6 +10,8 @@
   "continueWithGoogle": "Google로 계속하기",
   "continueWithFacebook": "Facebook으로 계속하기",
   "continueWithWhatsApp": "WhatsApp으로 계속하기",
+  "continueWithMicrosoft": "Microsoft로 계속하기",
+  "continueWithApple": "Apple로 계속하기",
   "continueWithEmail": "이메일로 계속하기",
   "email": "이메일",
   "password": "비밀번호",

@@ -21,7 +21,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -88,6 +88,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> with SingleTicker
                             label: '예산 ${project.budget!.currency.symbol}${fmt.format(project.budget!.totalBudget)}'),
                       const SizedBox(width: 8),
                       _InfoChip(icon: Icons.trending_up, label: '진행률 ${project.completionRate.toStringAsFixed(0)}%'),
+                      const SizedBox(width: 8),
+                      // 캠페인 연결 배지
+                      _CampaignLinkBadge(project: project, provider: provider),
                     ]),
                   ])),
                   // Actions
@@ -148,6 +151,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> with SingleTicker
                     Tab(text: '태스크 보드'),
                     Tab(text: '멤버별 태스크'),
                     Tab(text: '예산 & 비용'),
+                    Tab(text: '전략 연결'),
                   ],
                 ),
               ],
@@ -160,6 +164,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> with SingleTicker
                 _TaskBoardTab(provider: provider, project: project),
                 _MemberTasksTab(provider: provider, project: project),
                 _BudgetTab(provider: provider, project: project),
+                _StrategyLinkTab(provider: provider, project: project),
               ],
             ),
           ),
@@ -920,5 +925,875 @@ class _InfoChip extends StatelessWidget {
         Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
       ]),
     );
+  }
+}
+
+// ─── 캠페인 연결 배지 (프로젝트 헤더용) ────────────────────────
+class _CampaignLinkBadge extends StatelessWidget {
+  final Project project;
+  final AppProvider provider;
+  const _CampaignLinkBadge({required this.project, required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final linkedCampaign = project.campaignId != null
+        ? provider.campaigns.where((c) => c.id == project.campaignId).firstOrNull
+        : null;
+
+    if (linkedCampaign != null) {
+      // 연결된 캠페인 표시 + 클릭 시 캠페인 이동 또는 해제 메뉴
+      return GestureDetector(
+        onTap: () => _showCampaignMenu(context),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF29B6F6).withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF29B6F6).withValues(alpha: 0.4)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.campaign, color: Color(0xFF29B6F6), size: 12),
+            const SizedBox(width: 4),
+            Text(linkedCampaign.name,
+                style: const TextStyle(color: Color(0xFF29B6F6), fontSize: 11, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 4),
+            const Icon(Icons.expand_more, color: Color(0xFF29B6F6), size: 12),
+          ]),
+        ),
+      );
+    }
+
+    // 미연결 상태 – 연결 버튼
+    return GestureDetector(
+      onTap: () => _showLinkCampaignDialog(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCardLight,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF1E3040)),
+        ),
+        child: const Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.add_link, color: AppTheme.textMuted, size: 12),
+          SizedBox(width: 4),
+          Text('캠페인 연결', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+        ]),
+      ),
+    );
+  }
+
+  void _showCampaignMenu(BuildContext context) {
+    final linkedCampaign = provider.campaigns.where((c) => c.id == project.campaignId).firstOrNull;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('캠페인 연결 관리', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w700)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (linkedCampaign != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF29B6F6).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF29B6F6).withValues(alpha: 0.3)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.campaign, color: Color(0xFF29B6F6), size: 16),
+                const SizedBox(width: 8),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(linkedCampaign.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text('${linkedCampaign.type} · ${linkedCampaign.channel} · ${linkedCampaign.status}',
+                      style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                ])),
+              ]),
+            ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  provider.navigateTo('campaign');
+                },
+                icon: const Icon(Icons.open_in_new, size: 14),
+                label: const Text('캠페인으로 이동'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF29B6F6),
+                  side: const BorderSide(color: Color(0xFF29B6F6)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  provider.updateProjectCampaign(project.id, null);
+                  Navigator.pop(context);
+                },
+                icon: const Icon(Icons.link_off, size: 14),
+                label: const Text('연결 해제'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.error,
+                  side: const BorderSide(color: AppTheme.error),
+                ),
+              ),
+            ),
+          ]),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('닫기', style: TextStyle(color: AppTheme.textMuted)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLinkCampaignDialog(BuildContext context) {
+    final teamCampaigns = provider.teamCampaigns;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(children: [
+          const Icon(Icons.add_link, color: AppTheme.mintPrimary, size: 20),
+          const SizedBox(width: 8),
+          const Text('캠페인 연결', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w700)),
+        ]),
+        content: SizedBox(
+          width: 400,
+          child: teamCampaigns.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text('캠페인이 없습니다.', style: TextStyle(color: AppTheme.textMuted)),
+                )
+              : ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: ListView(children: teamCampaigns.map((c) {
+                    final statusColor = c.status == 'active' ? AppTheme.success
+                        : c.status == 'completed' ? AppTheme.info : AppTheme.warning;
+                    return InkWell(
+                      onTap: () {
+                        provider.updateProjectCampaign(project.id, c.id);
+                        Navigator.pop(context);
+                      },
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.bgCardLight,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF1E3040)),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.campaign_outlined, color: Color(0xFF29B6F6), size: 16),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(c.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+                            Text('${c.type} · ${c.channel}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                          ])),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              c.status == 'active' ? '진행 중' : c.status == 'completed' ? '완료' : '예정',
+                              style: TextStyle(color: statusColor, fontSize: 9),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    );
+                  }).toList()),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소', style: TextStyle(color: AppTheme.textMuted)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// 전략 연결 탭 - 캠페인/KPI/퍼널/고객사 유기적 연결
+// ══════════════════════════════════════════════════════════
+class _StrategyLinkTab extends StatefulWidget {
+  final AppProvider provider;
+  final Project project;
+
+  const _StrategyLinkTab({required this.provider, required this.project});
+
+  @override
+  State<_StrategyLinkTab> createState() => _StrategyLinkTabState();
+}
+
+class _StrategyLinkTabState extends State<_StrategyLinkTab> {
+  bool _showCampaignPicker = false;
+  bool _showKpiPicker = false;
+
+  AppProvider get p => widget.provider;
+  Project get proj => widget.project;
+
+  @override
+  Widget build(BuildContext context) {
+    final campaign = proj.campaignId != null
+        ? p.campaigns.where((c) => c.id == proj.campaignId).firstOrNull
+        : null;
+    final linkedKpis = p.kpis.where((k) => k.projectId == proj.id).toList();
+    final allTasks = proj.tasks;
+    final tasksByAssignee = <String, List<TaskDetail>>{};
+    for (final t in allTasks) {
+      for (final uid in t.assigneeIds) {
+        tasksByAssignee.putIfAbsent(uid, () => []).add(t);
+      }
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ─── 1. 캠페인 연결 ─────────────────────────────
+        _SectionCard(
+          icon: Icons.campaign_outlined,
+          color: AppTheme.mintPrimary,
+          title: '캠페인 연결',
+          subtitle: '이 프로젝트 태스크보드를 캠페인의 분석 대상으로 인식시킵니다',
+          child: campaign != null
+              ? _CampaignLink(
+                  campaign: campaign,
+                  onUnlink: () {
+                    p.updateProjectCampaign(proj.id, null);
+                  },
+                  onNavigate: () {
+                    p.selectCampaign(campaign.id);
+                    // 캠페인 탭으로 이동
+                    final shell = context.findAncestorStateOfType<State>();
+                    if (shell != null) {
+                      // 내비게이션 인덱스를 캠페인으로 변경 (index 2)
+                      try {
+                        (shell as dynamic).setIndex(2);
+                      } catch (_) {}
+                    }
+                  },
+                )
+              : _CampaignPickerBtn(
+                  show: _showCampaignPicker,
+                  campaigns: p.campaigns,
+                  onToggle: () => setState(() => _showCampaignPicker = !_showCampaignPicker),
+                  onSelect: (c) {
+                    p.updateProjectCampaign(proj.id, c.id);
+                    setState(() => _showCampaignPicker = false);
+                  },
+                ),
+        ),
+        const SizedBox(height: 14),
+
+        // ─── 2. KPI 연결 ────────────────────────────────
+        _SectionCard(
+          icon: Icons.track_changes_outlined,
+          color: AppTheme.info,
+          title: 'KPI 연결 (${linkedKpis.length}개)',
+          subtitle: '이 프로젝트와 연결된 KPI를 추적합니다',
+          action: TextButton.icon(
+            onPressed: () => setState(() => _showKpiPicker = !_showKpiPicker),
+            icon: Icon(_showKpiPicker ? Icons.close : Icons.add, size: 14),
+            label: Text(_showKpiPicker ? '닫기' : 'KPI 연결', style: const TextStyle(fontSize: 12)),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.info),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (linkedKpis.isEmpty && !_showKpiPicker)
+              const Text('연결된 KPI가 없습니다. KPI를 연결하면 진행률이 자동 반영됩니다.',
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12))
+            else
+              ...linkedKpis.map((k) => _KpiLinkRow(kpi: k, project: proj, provider: p)),
+
+            if (_showKpiPicker) ...[
+              const SizedBox(height: 10),
+              const Divider(color: Color(0xFF1E3040), height: 1),
+              const SizedBox(height: 10),
+              const Text('연결할 KPI 선택', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              ...p.teamKpis.where((k) => k.projectId != proj.id).map((k) =>
+                _KpiPickerRow(
+                  kpi: k,
+                  onLink: () {
+                    p.linkKpiToProject(k.id, proj.id);
+                    setState(() {});
+                  },
+                ),
+              ),
+              if (p.teamKpis.where((k) => k.projectId != proj.id).isEmpty)
+                const Text('연결 가능한 KPI가 없습니다', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 14),
+
+        // ─── 3. 개인별 KPI 자동 분류 현황 ────────────────
+        if (tasksByAssignee.isNotEmpty) _SectionCard(
+          icon: Icons.person_search_outlined,
+          color: AppTheme.warning,
+          title: '담당자별 태스크 → KPI 자동 분류',
+          subtitle: '태스크 완료 시 담당자의 개인 KPI에 자동 반영됩니다',
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ...tasksByAssignee.entries.map((e) {
+              final user = p.getUserById(e.key);
+              final tasks = e.value;
+              final done = tasks.where((t) => t.status == TaskStatus.done).length;
+              final personalKpis = p.kpis.where((k) =>
+                !k.isTeamKpi && k.assignedTo == e.key
+              ).toList();
+              return _AssigneeKpiRow(
+                userName: user?.name ?? user?.email ?? e.key,
+                userColor: _strColor(e.key),
+                totalTasks: tasks.length,
+                doneTasks: done,
+                personalKpiCount: personalKpis.length,
+                personalKpis: personalKpis,
+              );
+            }),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.warning.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.warning.withValues(alpha: 0.15)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.lightbulb_outline, color: AppTheme.warning, size: 14),
+                const SizedBox(width: 8),
+                Expanded(child: Text(
+                  'KPI 관리 탭에서 "개인별 KPI" 탭을 열면 각 담당자의 KPI를 확인할 수 있습니다',
+                  style: const TextStyle(color: AppTheme.warning, fontSize: 11),
+                )),
+              ]),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 14),
+
+        // ─── 4. 마케팅 퍼널 연결 현황 ─────────────────────
+        _SectionCard(
+          icon: Icons.filter_alt_outlined,
+          color: AppTheme.accentPurple,
+          title: '마케팅 퍼널 연결',
+          subtitle: '이 프로젝트와 연결된 퍼널 단계를 확인합니다',
+          child: _FunnelLinkStatus(provider: p, project: proj),
+        ),
+        const SizedBox(height: 14),
+
+        // ─── 5. 연결된 고객사 ─────────────────────────────
+        _SectionCard(
+          icon: Icons.business_outlined,
+          color: AppTheme.success,
+          title: '연결 고객사',
+          subtitle: '이 프로젝트 태스크에 지정된 고객사 목록입니다',
+          child: _LinkedClientsStatus(provider: p, project: proj),
+        ),
+      ]),
+    );
+  }
+
+  Color _strColor(String s) {
+    final colors = [AppTheme.mintPrimary, AppTheme.info, AppTheme.warning, AppTheme.success, AppTheme.error, AppTheme.accentPurple];
+    return colors[s.hashCode.abs() % colors.length];
+  }
+}
+
+// ── 섹션 카드 ────────────────────────────────────────────
+class _SectionCard extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final Widget child;
+  final Widget? action;
+
+  const _SectionCard({
+    required this.icon, required this.color, required this.title,
+    required this.subtitle, required this.child, this.action,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // 헤더
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.06),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
+            border: Border(bottom: BorderSide(color: color.withValues(alpha: 0.15))),
+          ),
+          child: Row(children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(width: 8),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+              Text(subtitle, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+            ])),
+            if (action != null) action!,
+          ]),
+        ),
+        // 바디
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: child,
+        ),
+      ]),
+    );
+  }
+}
+
+// ── 캠페인 연결 위젯 ──────────────────────────────────────
+class _CampaignLink extends StatelessWidget {
+  final CampaignModel campaign;
+  final VoidCallback onUnlink;
+  final VoidCallback onNavigate;
+
+  const _CampaignLink({required this.campaign, required this.onUnlink, required this.onNavigate});
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = campaign.status == 'active' ? AppTheme.success
+        : campaign.status == 'completed' ? AppTheme.info : AppTheme.warning;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCardLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.mintPrimary.withValues(alpha: 0.3)),
+      ),
+      child: Row(children: [
+        Icon(Icons.campaign, color: AppTheme.mintPrimary, size: 20),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(campaign.name,
+              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text('${campaign.type} · ${campaign.channel}',
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                campaign.status == 'active' ? '진행 중' : campaign.status == 'completed' ? '완료' : '예정',
+                style: TextStyle(color: statusColor, fontSize: 9, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text('ROI: ${campaign.roi.toStringAsFixed(0)}%',
+                style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+          ]),
+        ])),
+        Column(children: [
+          GestureDetector(
+            onTap: onNavigate,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.mintPrimary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.open_in_new, color: AppTheme.mintPrimary, size: 12),
+                SizedBox(width: 4),
+                Text('분석 보기', style: TextStyle(color: AppTheme.mintPrimary, fontSize: 11)),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: onUnlink,
+            child: const Text('연결 해제', style: TextStyle(color: AppTheme.error, fontSize: 10)),
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _CampaignPickerBtn extends StatelessWidget {
+  final bool show;
+  final List<CampaignModel> campaigns;
+  final VoidCallback onToggle;
+  final Function(CampaignModel) onSelect;
+
+  const _CampaignPickerBtn({
+    required this.show, required this.campaigns,
+    required this.onToggle, required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      GestureDetector(
+        onTap: onToggle,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppTheme.bgCardLight,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.mintPrimary.withValues(alpha: 0.4)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.add_link, color: AppTheme.mintPrimary, size: 14),
+            const SizedBox(width: 6),
+            Text(show ? '취소' : '캠페인 연결하기',
+                style: const TextStyle(color: AppTheme.mintPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      ),
+      if (show) ...[
+        const SizedBox(height: 8),
+        if (campaigns.isEmpty)
+          const Text('생성된 캠페인이 없습니다', style: TextStyle(color: AppTheme.textMuted, fontSize: 12))
+        else
+          ...campaigns.map((c) {
+            final statusColor = c.status == 'active' ? AppTheme.success
+                : c.status == 'completed' ? AppTheme.info : AppTheme.warning;
+            return GestureDetector(
+              onTap: () => onSelect(c),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.bgCardLight,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFF1E3040)),
+                ),
+                child: Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(c.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('${c.type} · ${c.channel}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                  ])),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      c.status == 'active' ? '진행 중' : c.status == 'completed' ? '완료' : '예정',
+                      style: TextStyle(color: statusColor, fontSize: 9),
+                    ),
+                  ),
+                ]),
+              ),
+            );
+          }),
+      ],
+    ]);
+  }
+}
+
+// ── KPI 연결 행 ──────────────────────────────────────────
+class _KpiLinkRow extends StatelessWidget {
+  final KpiModel kpi;
+  final Project project;
+  final AppProvider provider;
+
+  const _KpiLinkRow({required this.kpi, required this.project, required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = kpi.target > 0 ? (kpi.current / kpi.target).clamp(0.0, 1.0) : 0.0;
+    final pctColor = pct >= 1.0 ? AppTheme.success : pct >= 0.7 ? AppTheme.info : AppTheme.warning;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCardLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.info.withValues(alpha: 0.2)),
+      ),
+      child: Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(kpi.title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Row(children: [
+            Expanded(child: LinearProgressIndicator(
+              value: pct,
+              backgroundColor: AppTheme.bgCard,
+              valueColor: AlwaysStoppedAnimation(pctColor),
+              minHeight: 5,
+            )),
+            const SizedBox(width: 8),
+            Text('${(pct * 100).toStringAsFixed(0)}%',
+                style: TextStyle(color: pctColor, fontSize: 10, fontWeight: FontWeight.w700)),
+          ]),
+          Text('${kpi.current.toStringAsFixed(0)} / ${kpi.target.toStringAsFixed(0)} ${kpi.unit}',
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        ])),
+        GestureDetector(
+          onTap: () => provider.unlinkKpiFromProject(kpi.id, project.id),
+          child: const Padding(
+            padding: EdgeInsets.only(left: 8),
+            child: Icon(Icons.link_off, color: AppTheme.textMuted, size: 16),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _KpiPickerRow extends StatelessWidget {
+  final KpiModel kpi;
+  final VoidCallback onLink;
+
+  const _KpiPickerRow({required this.kpi, required this.onLink});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onLink,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.bgCardLight,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: const Color(0xFF1E3040)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.add_circle_outline, color: AppTheme.info, size: 14),
+          const SizedBox(width: 8),
+          Expanded(child: Text(kpi.title, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12))),
+          Text('${kpi.current.toStringAsFixed(0)}/${kpi.target.toStringAsFixed(0)} ${kpi.unit}',
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── 담당자별 KPI 행 ──────────────────────────────────────
+class _AssigneeKpiRow extends StatelessWidget {
+  final String userName;
+  final Color userColor;
+  final int totalTasks;
+  final int doneTasks;
+  final int personalKpiCount;
+  final List<KpiModel> personalKpis;
+
+  const _AssigneeKpiRow({
+    required this.userName, required this.userColor, required this.totalTasks,
+    required this.doneTasks, required this.personalKpiCount, required this.personalKpis,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = totalTasks > 0 ? doneTasks / totalTasks : 0.0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.bgCardLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: userColor.withValues(alpha: 0.2)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          CircleAvatar(
+            radius: 12,
+            backgroundColor: userColor.withValues(alpha: 0.2),
+            child: Text(userName.isNotEmpty ? userName[0].toUpperCase() : '?',
+                style: TextStyle(color: userColor, fontSize: 10, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(width: 8),
+          Text(userName, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+          const Spacer(),
+          Text('태스크 $doneTasks/$totalTasks',
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppTheme.warning.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text('개인KPI $personalKpiCount개',
+                style: const TextStyle(color: AppTheme.warning, fontSize: 9, fontWeight: FontWeight.w600)),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        LinearProgressIndicator(
+          value: pct,
+          backgroundColor: AppTheme.bgCard,
+          valueColor: AlwaysStoppedAnimation(userColor),
+          minHeight: 4,
+        ),
+        if (personalKpis.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(spacing: 4, runSpacing: 4, children: personalKpis.take(3).map((k) =>
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.info.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(k.title,
+                  style: const TextStyle(color: AppTheme.info, fontSize: 9)),
+            ),
+          ).toList()),
+        ],
+      ]),
+    );
+  }
+}
+
+// ── 퍼널 연결 현황 ────────────────────────────────────────
+class _FunnelLinkStatus extends StatelessWidget {
+  final AppProvider provider;
+  final Project project;
+
+  const _FunnelLinkStatus({required this.provider, required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    // 이 프로젝트의 캠페인과 연결된 퍼널 단계 확인
+    final campaignId = project.campaignId;
+    if (campaignId == null) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('캠페인을 연결하면 마케팅 퍼널 현황을 여기서 확인할 수 있습니다.',
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppTheme.accentPurple.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.accentPurple.withValues(alpha: 0.15)),
+          ),
+          child: Row(children: [
+            Icon(Icons.arrow_upward, color: AppTheme.accentPurple.withValues(alpha: 0.6), size: 14),
+            const SizedBox(width: 8),
+            const Text('위 "캠페인 연결" 섹션에서 캠페인을 먼저 연결하세요',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+          ]),
+        ),
+      ]);
+    }
+
+    // 연결된 KPI 중 퍼널 스테이지가 있는 것 표시
+    final funnelLinkedKpis = provider.kpis
+        .where((k) => k.campaignId == campaignId && k.funnelStageKey != null)
+        .toList();
+    final stages = provider.funnelStages;
+
+    if (funnelLinkedKpis.isEmpty && stages.isEmpty) {
+      return const Text('이 캠페인에 연결된 퍼널 데이터가 없습니다',
+          style: TextStyle(color: AppTheme.textMuted, fontSize: 12));
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('마케팅 퍼널 전환 현황',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 8),
+      ...stages.take(4).map((stage) {
+        final pct = stage.previousValue > 0
+            ? stage.value / stage.previousValue
+            : 1.0;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppTheme.accentPurple.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(children: [
+            Text(stage.icon, style: const TextStyle(fontSize: 14)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(stage.label,
+                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11))),
+            Text('${(pct * 100).toStringAsFixed(1)}%',
+                style: TextStyle(
+                  color: pct >= 0.5 ? AppTheme.success : AppTheme.warning,
+                  fontSize: 11, fontWeight: FontWeight.w700,
+                )),
+          ]),
+        );
+      }),
+    ]);
+  }
+}
+
+// ── 연결 고객사 현황 ──────────────────────────────────────
+class _LinkedClientsStatus extends StatelessWidget {
+  final AppProvider provider;
+  final Project project;
+
+  const _LinkedClientsStatus({required this.provider, required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    // 이 프로젝트 태스크에서 고객사 ID 수집
+    final clientIds = <String>{};
+    for (final task in project.tasks) {
+      clientIds.addAll(task.targetClientIds);
+    }
+
+    if (clientIds.isEmpty) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('태스크에 고객사를 지정하면 여기서 확인할 수 있습니다.',
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+        const SizedBox(height: 6),
+        const Text('태스크 편집 → "대상 고객사" 필드에서 설정하세요',
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+      ]);
+    }
+
+    final clients = provider.clients.where((c) => clientIds.contains(c.id)).toList();
+    return Wrap(spacing: 6, runSpacing: 6, children: clients.map((c) {
+      final regionColor = _regionColor(c.regionEn ?? c.region ?? '');
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: regionColor.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: regionColor.withValues(alpha: 0.3)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.business, color: regionColor, size: 12),
+          const SizedBox(width: 4),
+          Text(c.name, style: TextStyle(color: regionColor, fontSize: 11, fontWeight: FontWeight.w600)),
+          if (c.country != null) ...[
+            const SizedBox(width: 4),
+            Text(c.country!, style: TextStyle(color: regionColor.withValues(alpha: 0.7), fontSize: 9)),
+          ],
+        ]),
+      );
+    }).toList());
+  }
+
+  Color _regionColor(String region) {
+    final lower = region.toLowerCase();
+    if (lower.contains('asia') || lower.contains('아시아')) return const Color(0xFF4CAF50);
+    if (lower.contains('middle') || lower.contains('중동')) return const Color(0xFFFF9800);
+    if (lower.contains('europe') || lower.contains('유럽')) return const Color(0xFF2196F3);
+    if (lower.contains('america') || lower.contains('미주')) return const Color(0xFF9C27B0);
+    if (lower.contains('국내') || lower.contains('korea')) return AppTheme.mintPrimary;
+    return AppTheme.textSecondary;
   }
 }

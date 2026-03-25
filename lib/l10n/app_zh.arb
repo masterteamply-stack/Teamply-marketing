@@ -10,6 +10,8 @@
   "continueWithGoogle": "通过Google继续",
   "continueWithFacebook": "通过Facebook继续",
   "continueWithWhatsApp": "通过WhatsApp继续",
+  "continueWithMicrosoft": "通过Microsoft继续",
+  "continueWithApple": "通过Apple继续",
   "continueWithEmail": "通过邮箱继续",
   "email": "电子邮箱",
   "password": "密码",

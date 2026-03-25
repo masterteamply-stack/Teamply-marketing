@@ -284,7 +284,24 @@ class _SummaryCards extends StatelessWidget {
     final isYearly = provider.selectedQuarter == null;
     final selectedMetrics = provider.dashboardConfig.selectedSummaryMetrics;
 
-    // 전체 지표 맵
+    // 팀별 태스크 집계 (대시보드 카드 연동)
+    final taskSummary = provider.teamTaskSummary;
+    final totalTaskCount = taskSummary['total'] ?? 0;
+    final doneTaskCount = taskSummary['done'] ?? 0;
+    final inProgressCount = taskSummary['inProgress'] ?? 0;
+    final overdueCount = taskSummary['overdue'] ?? 0;
+    final taskCompletionRate = provider.currentTeamTaskCompletionRate;
+
+    // 팀별 캠페인 집계 (teamCampaigns 기반 - 팀 필터 적용됨)
+    final tCampaigns = provider.teamCampaigns;
+    final teamConversions = tCampaigns.fold(0.0, (s, c) => s + c.conversions).toInt();
+    final teamTotalBudget = tCampaigns.fold(0.0, (s, c) => s + c.budget);
+    final teamTotalSpent = tCampaigns.fold(0.0, (s, c) => s + c.spent);
+    final teamBudgetBurnRate = teamTotalBudget > 0
+        ? (teamTotalSpent / teamTotalBudget * 100).toStringAsFixed(0)
+        : '0';
+
+    // 전체 지표 맵 (모두 팀별 필터링 적용)
     final allCards = {
       '매출': _CardData('${isYearly ? '연간' : '분기'} 매출', '₩${_shortNum(revenue)}', Icons.attach_money, AppTheme.mintPrimary, _revenueYoY(provider)),
       '마케팅 ROI': _CardData('마케팅 ROI', '${fmtM.format(roi)}%', Icons.trending_up, AppTheme.info, roi >= 200 ? '목표 초과' : roi >= 150 ? '양호' : '개선 필요'),
@@ -293,9 +310,17 @@ class _SummaryCards extends StatelessWidget {
       'KPI 달성률': _CardData('KPI 달성률', '${fmtM.format(provider.avgKpiAchievement)}%', Icons.flag_outlined, const Color(0xFFAB47BC), '평균'),
       '활성 캠페인': _CardData('활성 캠페인', '${provider.activeCampaigns}개', Icons.campaign_outlined, const Color(0xFFFF7043), '진행 중'),
       'ROAS': _CardData('ROAS', adSpend > 0 ? '${(revenue / adSpend).toStringAsFixed(1)}x' : '-', Icons.bar_chart, AppTheme.accentBlue, adSpend > 0 && revenue / adSpend >= 2 ? '우수' : '모니터링'),
-      '전환수': _CardData('전환수', '${fmt.format(provider.campaigns.fold(0.0, (s, c) => s + c.conversions).toInt())}건', Icons.swap_horiz, AppTheme.accentGreen, '누적'),
-      '총 예산': _CardData('총 예산', '₩${_shortNum(provider.campaigns.fold(0.0, (s, c) => s + c.budget))}', Icons.savings_outlined, const Color(0xFF26C6DA), '전체'),
-      '예산 소진율': _CardData('예산 소진율', '${provider.campaigns.isEmpty ? 0 : (provider.campaigns.fold(0.0, (s, c) => s + c.spent) / provider.campaigns.fold(0.0, (s, c) => s + c.budget) * 100).toStringAsFixed(0)}%', Icons.donut_small_outlined, const Color(0xFFEF5350), '소진'),
+      // 팀 필터 적용된 지표들
+      '전환수': _CardData('전환수', '${fmt.format(teamConversions)}건', Icons.swap_horiz, AppTheme.accentGreen, '팀 누적'),
+      '총 예산': _CardData('총 예산', '₩${_shortNum(teamTotalBudget)}', Icons.savings_outlined, const Color(0xFF26C6DA), '팀 전체'),
+      '예산 소진율': _CardData('예산 소진율', '$teamBudgetBurnRate%', Icons.donut_small_outlined, const Color(0xFFEF5350), '소진'),
+      // 팀 태스크 집계 카드 (대시보드 ↔ 팀 태스크 연동)
+      '태스크 완료율': _CardData('태스크 완료율', '${taskCompletionRate.toStringAsFixed(0)}%',
+          Icons.task_alt, AppTheme.success,
+          '$doneTaskCount/$totalTaskCount 완료'),
+      '진행 중 태스크': _CardData('진행 중 태스크', '${inProgressCount}건',
+          Icons.pending_actions, AppTheme.info,
+          overdueCount > 0 ? '지연 ${overdueCount}건' : '정상 진행'),
     };
 
     // 선택된 지표만 표시 (순서 유지)
@@ -704,7 +729,8 @@ class _ActiveCampaigns extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final typeFilter = provider.dashboardConfig.campaignTypeFilter;
-    var campaigns = provider.campaigns
+    // 팀 캠페인만 표시 (teamCampaigns: 선택된 팀의 캠페인만)
+    var campaigns = provider.teamCampaigns
         .where((c) => c.status == 'active' || c.status == '진행중')
         .toList();
     // 캠페인 분류 필터 적용
@@ -914,9 +940,14 @@ class _AllTasksSectionState extends State<_AllTasksSection> {
 
   @override
   Widget build(BuildContext context) {
-    final all = widget.provider.allTasksWithProject;
+    // 팀 필터링된 태스크만 표시 (currentTeamTasksWithProject 사용)
+    final all = widget.provider.currentTeamTasksWithProject;
     final filtered = _applyFilter(all, _filter);
     final filterTabs = ['전체', '진행', '검토', '완료', '대기'];
+    final selectedTeam = widget.provider.selectedTeam;
+    final teamLabel = selectedTeam != null
+        ? '${selectedTeam.iconEmoji} ${selectedTeam.name}'
+        : '전체';
 
     return Container(
       decoration: BoxDecoration(
@@ -931,8 +962,18 @@ class _AllTasksSectionState extends State<_AllTasksSection> {
             child: Row(children: [
               const Icon(Icons.task_alt, color: AppTheme.mintPrimary, size: 18),
               const SizedBox(width: 8),
-              const Text('전체 태스크 현황',
+              const Text('팀 태스크 현황',
                   style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.mintPrimary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(teamLabel,
+                    style: const TextStyle(color: AppTheme.mintPrimary, fontSize: 10, fontWeight: FontWeight.w600)),
+              ),
               const Spacer(),
               Text('${filtered.length}/${all.length}개',
                   style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),

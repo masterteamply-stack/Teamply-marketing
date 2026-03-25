@@ -6,6 +6,7 @@ import '../../providers/app_provider.dart';
 import '../../l10n/app_localizations.dart';
 import 'client_management_page.dart';
 import 'region_management_page.dart';
+import '../../widgets/account_switcher_dialog.dart';
 
 class AppSettingsPage extends StatefulWidget {
   const AppSettingsPage({super.key});
@@ -101,6 +102,16 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
               _sectionTitle('계정'),
               _settingsCard([
                 _accountTile(auth),
+                const Divider(height: 1, color: Color(0xFF2A3F52)),
+                _settingsTile(
+                  icon: Icons.manage_accounts_rounded,
+                  iconColor: AppTheme.mintPrimary,
+                  title: '계정 관리',
+                  subtitle: auth.savedAccounts.isNotEmpty
+                      ? '저장된 계정 ${auth.totalSavedAccounts}개 • 계정 전환 가능'
+                      : '로그인/로그아웃 및 계정 전환',
+                  onTap: () => AccountSwitcherDialog.show(context),
+                ),
               ]),
               const SizedBox(height: 20),
 
@@ -720,19 +731,23 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
 
   IconData _providerIcon(LoginProvider p) {
     switch (p) {
-      case LoginProvider.google:   return Icons.g_mobiledata_rounded;
-      case LoginProvider.facebook: return Icons.facebook_rounded;
-      case LoginProvider.whatsapp: return Icons.chat_rounded;
-      case LoginProvider.email:    return Icons.email_outlined;
+      case LoginProvider.google:    return Icons.g_mobiledata_rounded;
+      case LoginProvider.microsoft: return Icons.window_rounded;
+      case LoginProvider.apple:     return Icons.apple_rounded;
+      case LoginProvider.facebook:  return Icons.facebook_rounded;
+      case LoginProvider.whatsapp:  return Icons.chat_rounded;
+      case LoginProvider.email:     return Icons.email_outlined;
     }
   }
 
   Color _providerColor(LoginProvider p) {
     switch (p) {
-      case LoginProvider.google:   return const Color(0xFFDB4437);
-      case LoginProvider.facebook: return const Color(0xFF1877F2);
-      case LoginProvider.whatsapp: return const Color(0xFF25D366);
-      case LoginProvider.email:    return AppTheme.accentBlue;
+      case LoginProvider.google:    return const Color(0xFFDB4437);
+      case LoginProvider.microsoft: return const Color(0xFF00A4EF);
+      case LoginProvider.apple:     return Colors.white;
+      case LoginProvider.facebook:  return const Color(0xFF1877F2);
+      case LoginProvider.whatsapp:  return const Color(0xFF25D366);
+      case LoginProvider.email:     return AppTheme.accentBlue;
     }
   }
 }

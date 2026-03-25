@@ -39,6 +39,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get continueWithWhatsApp => 'المتابعة مع WhatsApp';
 
   @override
+  String get continueWithMicrosoft => 'المتابعة مع Microsoft';
+
+  @override
+  String get continueWithApple => 'المتابعة مع Apple';
+
+  @override
   String get continueWithEmail => 'المتابعة بالبريد الإلكتروني';
 
   @override

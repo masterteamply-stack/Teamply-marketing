@@ -67,7 +67,7 @@ class _TaskEditDialogState extends State<TaskEditDialog> with SingleTickerProvid
 
   void _save() {
     widget.provider.updateTask(
-      widget.project.id, widget.task.id,
+      widget.project.id, widget.task,
       title: _titleCtrl.text.trim(),
       description: _descCtrl.text.trim(),
       status: _status, priority: _priority,

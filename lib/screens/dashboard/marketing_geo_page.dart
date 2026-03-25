@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
 import '../../providers/app_provider.dart';
 import '../../models/models.dart';
+import '../../widgets/client_csv_upload_dialog.dart';
 
 class MarketingGeoPage extends StatefulWidget {
   const MarketingGeoPage({super.key});
@@ -393,7 +394,7 @@ class _ClientAnalysisTabState extends State<_ClientAnalysisTab> {
         // 툴바: 고객사 추가 / CSV 일괄 업로드
         Row(mainAxisAlignment: MainAxisAlignment.end, children: [
           TextButton.icon(
-            onPressed: () => showDialog(context: context, builder: (_) => _ClientBulkDialog(provider: p)),
+            onPressed: () => showDialog(context: context, builder: (_) => ClientCsvUploadDialog(provider: p)),
             icon: const Icon(Icons.upload_file_rounded, size: 13, color: AppTheme.accentBlue),
             label: const Text('CSV 일괄 업로드', style: TextStyle(color: AppTheme.accentBlue, fontSize: 12)),
           ),
@@ -915,7 +916,7 @@ class _GeoSettingsTabState extends State<_GeoSettingsTab> with SingleTickerProvi
   void _showBulkUploadDialog(BuildContext ctx, AppProvider p) {
     showDialog(
       context: ctx,
-      builder: (_) => _ClientBulkDialog(provider: p),
+      builder: (_) => ClientCsvUploadDialog(provider: p),
     );
   }
 

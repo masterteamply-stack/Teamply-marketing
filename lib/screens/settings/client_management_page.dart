@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
 import '../../providers/app_provider.dart';
 import '../../models/models.dart';
+import '../../widgets/client_csv_upload_dialog.dart';
 
 // ════════════════════════════════════════════════════════
 //  고객사 관리 페이지
@@ -199,7 +200,7 @@ class _ClientManagementPageState extends State<ClientManagementPage> {
   void _showBulkUploadDialog(BuildContext ctx, AppProvider provider) {
     showDialog(
       context: ctx,
-      builder: (_) => _ClientBulkUploadDialog(provider: provider),
+      builder: (_) => ClientCsvUploadDialog(provider: provider),
     );
   }
 
@@ -671,17 +672,18 @@ class _ClientEditDialogState extends State<_ClientEditDialog> {
 }
 
 // ════════════════════════════════════════════════════════
-//  CSV 벌크 업로드 다이얼로그
+//  CSV 벌크 업로드 다이얼로그 (레거시 - 이제 ClientCsvUploadDialog 사용)
 // ════════════════════════════════════════════════════════
-class _ClientBulkUploadDialog extends StatefulWidget {
+// ignore: unused_element
+class _ClientBulkUploadDialogLegacy extends StatefulWidget {
   final AppProvider provider;
-  const _ClientBulkUploadDialog({required this.provider});
+  const _ClientBulkUploadDialogLegacy({required this.provider});
 
   @override
-  State<_ClientBulkUploadDialog> createState() => _ClientBulkUploadDialogState();
+  State<_ClientBulkUploadDialogLegacy> createState() => _ClientBulkUploadDialogState();
 }
 
-class _ClientBulkUploadDialogState extends State<_ClientBulkUploadDialog> {
+class _ClientBulkUploadDialogState extends State<_ClientBulkUploadDialogLegacy> {
   final _ctrl = TextEditingController();
   List<ClientAccount> _parsed = [];
   String? _error;

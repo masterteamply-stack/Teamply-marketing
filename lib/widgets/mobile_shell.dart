@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/app_provider.dart';
+import '../providers/auth_provider.dart';
+import 'account_switcher_dialog.dart';
 import '../screens/dashboard/overview_page.dart';
 import '../screens/team/team_list_page.dart';
 import '../screens/team/team_detail_page.dart';
@@ -131,7 +133,10 @@ class MobileShell extends StatelessWidget {
         if (!showBackButton)
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: _UserAvatar(user: provider.currentUser),
+            child: GestureDetector(
+              onTap: () => AccountSwitcherDialog.show(context),
+              child: _UserAvatar(user: provider.currentUser),
+            ),
           ),
       ],
       bottom: PreferredSize(
@@ -319,29 +324,8 @@ class _MobileDrawer extends StatelessWidget {
             }),
             const Spacer(),
             const Divider(height: 1, color: Color(0xFF1E3040)),
-            // User Footer
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
-                children: [
-                  _UserAvatar(user: provider.currentUser, radius: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(provider.currentUser.name,
-                            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
-                        Text(provider.currentUser.email,
-                            style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                            overflow: TextOverflow.ellipsis),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.settings_outlined, color: AppTheme.textMuted, size: 18),
-                ],
-              ),
-            ),
+            // User Footer with account management
+            _MobileDrawerFooter(provider: provider),
           ],
         ),
       ),
@@ -424,6 +408,129 @@ class _MobileContentArea extends StatelessWidget {
       default:
         return const OverviewPage();
     }
+  }
+}
+
+// ─────────────────────────────────
+//  MOBILE DRAWER FOOTER
+// ─────────────────────────────────
+class _MobileDrawerFooter extends StatelessWidget {
+  final AppProvider provider;
+  const _MobileDrawerFooter({required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    final user = provider.currentUser;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+      child: Column(
+        children: [
+          // 유저 정보 행
+          Row(
+            children: [
+              Stack(
+                children: [
+                  _UserAvatar(user: user, radius: 18),
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00E676),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppTheme.bgCard, width: 1.2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(user.name,
+                        style: const TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      auth.user?.email ?? user.email,
+                      style: const TextStyle(
+                          color: AppTheme.textMuted, fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // 계정 관리 + 로그아웃 버튼
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    Navigator.pop(context); // 드로어 닫기
+                    AccountSwitcherDialog.show(context);
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: AppTheme.mintPrimary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: AppTheme.mintPrimary.withValues(alpha: 0.3)),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.manage_accounts_rounded,
+                            color: AppTheme.mintPrimary, size: 15),
+                        SizedBox(width: 5),
+                        Text('계정 관리',
+                            style: TextStyle(
+                                color: AppTheme.mintPrimary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              InkWell(
+                onTap: () async {
+                  Navigator.pop(context); // 드로어 닫기
+                  provider.clearUid();
+                  await auth.signOut();
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: Colors.redAccent.withValues(alpha: 0.3)),
+                  ),
+                  child: const Icon(Icons.logout_rounded,
+                      color: Colors.redAccent, size: 16),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 

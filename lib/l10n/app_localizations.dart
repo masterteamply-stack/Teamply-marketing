@@ -166,6 +166,18 @@ abstract class AppLocalizations {
   /// **'Continue with WhatsApp'**
   String get continueWithWhatsApp;
 
+  /// No description provided for @continueWithMicrosoft.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Microsoft'**
+  String get continueWithMicrosoft;
+
+  /// No description provided for @continueWithApple.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Apple'**
+  String get continueWithApple;
+
   /// No description provided for @continueWithEmail.
   ///
   /// In en, this message translates to:

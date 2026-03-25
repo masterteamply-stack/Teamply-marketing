@@ -39,6 +39,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get continueWithWhatsApp => 'WhatsAppで続ける';
 
   @override
+  String get continueWithMicrosoft => 'Microsoftで続ける';
+
+  @override
+  String get continueWithApple => 'Appleで続ける';
+
+  @override
   String get continueWithEmail => 'メールで続ける';
 
   @override

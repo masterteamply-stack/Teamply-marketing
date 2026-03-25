@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
-import '../services/firestore_service.dart';
+import "../services/supabase_service.dart";
 
 // ─── 로컬 지속성 키 ─────────────────────────────────────────
 const _kLocalTeams     = 'local_teams_v2';
@@ -18,7 +18,7 @@ class AppProvider extends ChangeNotifier {
   String? _uid;
   bool _firebaseLoaded = false;
   bool _dataReady = false;      // 대시보드 표시 준비 완료 여부
-  final FirestoreService _fs = FirestoreService();
+  final SupabaseService _svc = SupabaseService();
 
   // 실시간 스트림 구독 취소
   StreamSubscription<List<Team>>? _teamsSub;
@@ -186,7 +186,7 @@ class AppProvider extends ChangeNotifier {
     _projectsSub?.cancel();
 
     // 팀 실시간 동기화
-    _teamsSub = _fs.watchTeams(uid).listen((teams) {
+    _teamsSub = _svc.watchTeams(uid).listen((teams) {
       if (teams.isNotEmpty) {
         _teams.clear();
         _teams.addAll(teams);
@@ -199,7 +199,7 @@ class AppProvider extends ChangeNotifier {
     });
 
     // 개인 프로젝트 실시간 동기화
-    _projectsSub = _fs.watchProjects(uid).listen((projects) {
+    _projectsSub = _svc.watchProjects(uid).listen((projects) {
       if (projects.isNotEmpty) {
         _projectStore.clear();
         _projectStore.addAll(projects);
@@ -227,7 +227,7 @@ class AppProvider extends ChangeNotifier {
     // 새 팀에 대한 구독 추가
     for (final team in _teams) {
       if (_sharedProjectSubs.containsKey(team.id)) continue;
-      _sharedProjectSubs[team.id] = _fs.watchSharedProjects(team.id).listen((sharedProjs) {
+      _sharedProjectSubs[team.id] = _svc.watchSharedProjects(team.id).listen((sharedProjs) {
         // 공유 프로젝트를 로컬 store에 merge (중복 제거)
         for (final sp in sharedProjs) {
           final idx = _projectStore.indexWhere((p) => p.id == sp.id);
@@ -259,23 +259,23 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> _loadFromFirebase(String uid) async {
     // Firebase 사용 불가 시 로컬 샘플 데이터 유지
-    if (!_fs.isAvailable) {
+    if (!_svc.isAvailable) {
       if (kDebugMode) debugPrint('[AppProvider] Firebase offline → using local sample data');
       _firebaseLoaded = false;
       return;   // setUidAndLoad 에서 _dataReady = true 처리
     }
 
     try {
-      final isNew = await _fs.isNewUser(uid).timeout(const Duration(seconds: 10));
+      final isNew = await _svc.isNewUser(uid).timeout(const Duration(seconds: 10));
       if (isNew) {
         // 첫 가입: 빈 상태로 시작 (샘플 데이터 없음) - currentUser 메타만 저장
-        await _fs.saveUserMeta(uid, _currentUser.email, _currentUser.name);
+        await _svc.saveUserMeta(uid, _currentUser.email, _currentUser.name);
         if (kDebugMode) debugPrint('[AppProvider] New user → starting with empty data');
         // 팀/KPI/캠페인은 사용자가 직접 생성
         if (_teams.isEmpty) _selectedTeamId = null;
       } else {
         // 기존 유저: Firebase에서 데이터 로드
-        final bundle = await _fs.loadAllUserData(uid).timeout(const Duration(seconds: 10));
+        final bundle = await _svc.loadAllUserData(uid).timeout(const Duration(seconds: 10));
         if (!bundle.isEmpty) {
           _teams.clear();       _teams.addAll(bundle.teams);
           _projectStore.clear(); _projectStore.addAll(bundle.projects);
@@ -295,7 +295,7 @@ class AppProvider extends ChangeNotifier {
           if (kDebugMode) debugPrint('[AppProvider] Loaded existing user data from Firebase');
         }
         // 유저 프리퍼런스 로드 (디폴트 페이지 등)
-        final prefs = await _fs.loadUserPrefs(uid);
+        final prefs = await _svc.loadUserPrefs(uid);
         if (prefs != null) {
           _defaultSection = prefs['defaultSection'] as String? ?? 'dashboard';
           _currentSection = _defaultSection;
@@ -315,7 +315,7 @@ class AppProvider extends ChangeNotifier {
       campaigns: _campaigns, regions: _regions, clients: _clients,
       members: _allUsers,
     );
-    await _fs.saveAllUserData(uid, bundle);
+    await _svc.saveAllUserData(uid, bundle);
   }
 
   @override
@@ -326,6 +326,7 @@ class AppProvider extends ChangeNotifier {
   }
 
   bool get isFirebaseLoaded => _firebaseLoaded;
+  bool get isSupabaseAvailable => _svc.isAvailable;
 
   // ─── Current User (현재 로그인 사용자) ─────────────────────
   AppUser _currentUser = AppUser(
@@ -342,6 +343,7 @@ class AppProvider extends ChangeNotifier {
   final List<FunnelStage> _funnelStages = [];
   final List<MonthlyData> _monthlyData = [];
   final List<MonthlyKpiRecord> _monthlyKpiRecords = [];
+  final List<StrategyFramework> _strategyFrameworks = [];
 
   // ─── 새 기능 데이터 ─────────────────────────────────────────
   final List<DmConversation> _dmConversations = [];
@@ -396,6 +398,191 @@ class AppProvider extends ChangeNotifier {
   }
   List<KpiModel> get personalKpis => _kpis.where((k) => !k.isTeamKpi && (k.assignedTo == _currentUser.id)).toList();
   List<CampaignModel> get campaigns => _campaigns;
+
+  /// 현재 선택된 팀의 캠페인만 반환
+  List<CampaignModel> get teamCampaigns {
+    if (_selectedTeamId == null) return _campaigns;
+    return _campaigns.where((c) => c.teamId == _selectedTeamId || c.teamId == null).toList();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  팀별 통합 집계 (대시보드/KPI/캠페인 연동의 핵심)
+  // ═══════════════════════════════════════════════════════════
+
+  /// 현재 팀의 모든 태스크 (프로젝트를 통해)
+  List<TaskDetail> get currentTeamTasks {
+    if (_selectedTeamId == null) {
+      return _projectStore.expand((p) => p.tasks).toList();
+    }
+    return _projectStore
+        .where((p) => p.teamId == _selectedTeamId)
+        .expand((p) => p.tasks)
+        .toList();
+  }
+
+  /// 현재 팀의 프로젝트
+  List<Project> get currentTeamProjects {
+    if (_selectedTeamId == null) return _projectStore;
+    return _projectStore.where((p) => p.teamId == _selectedTeamId).toList();
+  }
+
+  /// 태스크에서 파생된 KPI 달성률 자동 집계
+  /// - task.kpiId 가 있으면 해당 KPI의 current를 태스크 완료율로 자동 업데이트
+  void syncTaskKpiProgress() {
+    bool changed = false;
+    for (final kpi in _kpis) {
+      // 이 KPI에 연결된 모든 태스크 수집
+      final relatedTasks = <TaskDetail>[];
+      for (final proj in _projectStore) {
+        for (final task in proj.tasks) {
+          if (task.kpiId == kpi.id) relatedTasks.add(task);
+        }
+      }
+      if (relatedTasks.isEmpty) continue;
+
+      // 태스크 완료율로 KPI current 자동 업데이트
+      final done = relatedTasks.where((t) => t.status == TaskStatus.done).length;
+      final progress = done / relatedTasks.length * kpi.target;
+      if ((progress - kpi.current).abs() > 0.01) {
+        kpi.current = progress;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// 팀별 태스크 상태 집계 (대시보드 카드용)
+  Map<TaskStatus, int> get currentTeamTaskStatusCount {
+    final map = <TaskStatus, int>{for (final s in TaskStatus.values) s: 0};
+    for (final task in currentTeamTasks) {
+      map[task.status] = (map[task.status] ?? 0) + 1;
+    }
+    return map;
+  }
+
+  /// 팀별 태스크 완료율
+  double get currentTeamTaskCompletionRate {
+    final tasks = currentTeamTasks;
+    if (tasks.isEmpty) return 0;
+    return tasks.where((t) => t.status == TaskStatus.done).length / tasks.length * 100;
+  }
+
+  /// 팀별 예산 합계 (태스크+프로젝트)
+  double get currentTeamTotalBudgetKrw {
+    return currentTeamProjects.fold(
+        0.0, (s, p) => s + p.totalBudgetKrw);
+  }
+
+  /// 팀별 집행 비용 합계
+  double get currentTeamExecutedCostKrw {
+    return currentTeamProjects.fold(
+        0.0, (s, p) => s + p.executedCostKrw);
+  }
+
+  /// 팀별 예산 소진율
+  double get currentTeamBudgetUsageRate {
+    final budget = currentTeamTotalBudgetKrw;
+    if (budget <= 0) return 0;
+    return (currentTeamExecutedCostKrw / budget * 100).clamp(0, 200);
+  }
+
+  /// KPI에 연결된 태스크 목록 (팀 기준 필터)
+  List<TaskWithProject> getLinkedTasksForKpi(String kpiId) {
+    final result = <TaskWithProject>[];
+    final projects = _selectedTeamId != null
+        ? _projectStore.where((p) => p.teamId == _selectedTeamId)
+        : _projectStore as Iterable<Project>;
+    for (final proj in projects) {
+      for (final task in proj.tasks) {
+        if (task.kpiId == kpiId) {
+          result.add(TaskWithProject(task: task, project: proj));
+        }
+      }
+    }
+    return result;
+  }
+
+  /// 캠페인에 연결된 태스크 목록 (팀 기준 필터)
+  List<TaskWithProject> getLinkedTasksForCampaign(String campaignId) {
+    final result = <TaskWithProject>[];
+    final projects = _selectedTeamId != null
+        ? _projectStore.where((p) => p.teamId == _selectedTeamId)
+        : _projectStore as Iterable<Project>;
+    for (final proj in projects) {
+      // campaignId 직접 연결 또는 task.campaignId 연결
+      final projMatches = proj.campaignId == campaignId;
+      for (final task in proj.tasks) {
+        if (projMatches || task.campaignId == campaignId) {
+          result.add(TaskWithProject(task: task, project: proj));
+        }
+      }
+    }
+    return result;
+  }
+
+  /// 팀별 캠페인 KPI 집계 (캠페인 → KPI 연결)
+  List<KpiModel> getKpisForCampaign(String campaignId) {
+    return currentTeamKpis.where((k) => k.campaignId == campaignId).toList();
+  }
+
+  /// 태스크 진행상황을 대시보드 summary 카드용으로 집계
+  /// 반환: {todo, inProgress, inReview, done, overdue}
+  Map<String, int> get teamTaskSummary {
+    final tasks = currentTeamTasks;
+    final now = DateTime.now();
+    return {
+      'total': tasks.length,
+      'todo': tasks.where((t) => t.status == TaskStatus.todo).length,
+      'inProgress': tasks.where((t) => t.status == TaskStatus.inProgress).length,
+      'inReview': tasks.where((t) => t.status == TaskStatus.inReview).length,
+      'done': tasks.where((t) => t.status == TaskStatus.done).length,
+      'overdue': tasks.where((t) =>
+          t.dueDate != null &&
+          t.dueDate!.isBefore(now) &&
+          t.status != TaskStatus.done).length,
+    };
+  }
+
+  /// 담당자별 태스크 수 집계 (팀 대시보드용)
+  Map<String, int> get taskCountByMember {
+    final map = <String, int>{};
+    for (final task in currentTeamTasks) {
+      for (final uid in task.assigneeIds) {
+        map[uid] = (map[uid] ?? 0) + 1;
+      }
+      if (task.assigneeIds.isEmpty) {
+        map['unassigned'] = (map['unassigned'] ?? 0) + 1;
+      }
+    }
+    return map;
+  }
+
+  /// 팀별 KPI 달성률 (태스크 자동 집계 포함)
+  double get currentTeamKpiAchievement {
+    final kpis = currentTeamKpis;
+    if (kpis.isEmpty) return 0;
+    return kpis.fold(0.0, (s, k) => s + k.achievementRate) / kpis.length;
+  }
+
+  /// 팀 변경 (네비게이션 팀 스위처에서 사용)
+  /// - 현재 섹션(대시보드, KPI, 캠페인 등)을 유지하되 팀 데이터만 갱신
+  /// - 팀 상세/프로젝트/태스크 상세에서는 대시보드로 이동
+  void switchTeam(String teamId) {
+    if (_selectedTeamId == teamId) return;
+    _selectedTeamId = teamId;
+    _selectedProjectId = null;
+    _selectedTaskId = null;
+    // 팀 종속 하위 페이지에서 전환 시 적절한 섹션으로 이동
+    if (_currentSection == 'team_detail' ||
+        _currentSection == 'project_detail' ||
+        _currentSection == 'task_detail') {
+      _currentSection = 'dashboard';
+    }
+    // syncTaskKpiProgress 호출로 KPI 달성률 자동 갱신
+    syncTaskKpiProgress();
+    notifyListeners();
+  }
+
   List<FunnelStage> get funnelStages => _funnelStages;
   List<MonthlyData> get monthlyData => _monthlyData;
   List<MonthlyKpiRecord> get monthlyKpiRecords => _monthlyKpiRecords;
@@ -411,10 +598,59 @@ class AppProvider extends ChangeNotifier {
   String? get selectedProjectId => _selectedProjectId;
   String? get selectedTaskId => _selectedTaskId;
 
+  // 전략 프레임워크 Getters
+  List<StrategyFramework> get strategyFrameworks => _strategyFrameworks;
+  List<StrategyFramework> get teamStrategyFrameworks {
+    if (_selectedTeamId == null) return _strategyFrameworks;
+    return _strategyFrameworks.where((f) => f.teamId == _selectedTeamId).toList();
+  }
+
+  StrategyFramework? getFrameworkForTeam(String teamId) =>
+      _strategyFrameworks.firstWhere((f) => f.teamId == teamId, orElse: () {
+        final fw = StrategyFramework.brandToDemand(teamId);
+        _strategyFrameworks.add(fw);
+        _saveToLocal(_uid ?? '');
+        return fw;
+      });
+
+  void addStrategyFramework(StrategyFramework fw) {
+    _strategyFrameworks.removeWhere((f) => f.id == fw.id);
+    _strategyFrameworks.add(fw);
+    if (_uid != null) _saveToLocal(_uid!);
+    notifyListeners();
+  }
+
+  void updateStrategyFramework(StrategyFramework fw) {
+    final idx = _strategyFrameworks.indexWhere((f) => f.id == fw.id);
+    if (idx >= 0) _strategyFrameworks[idx] = fw;
+    else _strategyFrameworks.add(fw);
+    if (_uid != null) _saveToLocal(_uid!);
+    notifyListeners();
+  }
+
+  void updateCampaign(CampaignModel c) {
+    final idx = _campaigns.indexWhere((x) => x.id == c.id);
+    if (idx >= 0) {
+      _campaigns[idx] = c;
+      if (_uid != null) {
+        _svc.saveCampaign(_uid!, c);  
+        _saveToLocal(_uid!);
+      }
+      notifyListeners();
+    }
+  }
+
   // 권역/고객 Getters
   List<MarketingRegion> get regions => _regions;
   List<ClientAccount> get clients => _clients;
   List<ClientAccount> get activeClients => _clients.where((c) => c.isActive).toList();
+
+  /// 현재 팀의 고객사만
+  List<ClientAccount> get teamClients {
+    if (_selectedTeamId == null) return _clients;
+    return _clients.where((c) => c.teamId == null || c.teamId == _selectedTeamId).toList();
+  }
+
   List<ProjectRevenueEntry> get revenueEntries => _revenueEntries;
 
   // 대시보드 설정 Getter
@@ -541,22 +777,72 @@ class AppProvider extends ChangeNotifier {
 
   List<TaskWithProject> getTasksByCampaignId(String campaignId) {
     final result = <TaskWithProject>[];
-    final campaign = _campaigns.firstWhere((c) => c.id == campaignId, orElse: () => _campaigns.first);
-    final lower = campaign.name.toLowerCase();
+    // 1순위: Project.campaignId 직접 매칭
     for (final proj in _projectStore) {
-      for (final task in proj.tasks) {
-        final matches = task.tags.any((t) => t.toLowerCase().contains(lower)) ||
-            task.title.toLowerCase().contains(lower) ||
-            proj.name.toLowerCase().contains(lower);
-        if (matches) result.add(TaskWithProject(task: task, project: proj));
+      if (proj.campaignId == campaignId) {
+        for (final task in proj.tasks) {
+          result.add(TaskWithProject(task: task, project: proj));
+        }
+      }
+    }
+    // 2순위: task.tags / 이름 매칭 (campaignId 직접 연결이 없는 경우 보조)
+    if (result.isEmpty) {
+      final campaign = _campaigns.firstWhere((c) => c.id == campaignId,
+          orElse: () => _campaigns.isNotEmpty ? _campaigns.first : CampaignModel(
+            id: campaignId, name: '', type: '', status: '', channel: '',
+            budget: 0, spent: 0, revenue: 0, impressions: 0, clicks: 0,
+            conversions: 0, startDate: DateTime.now(), endDate: DateTime.now(),
+          ));
+      final lower = campaign.name.toLowerCase();
+      if (lower.isNotEmpty) {
+        for (final proj in _projectStore) {
+          for (final task in proj.tasks) {
+            final matches = task.tags.any((t) => t.toLowerCase().contains(lower)) ||
+                task.title.toLowerCase().contains(lower) ||
+                proj.name.toLowerCase().contains(lower);
+            if (matches) result.add(TaskWithProject(task: task, project: proj));
+          }
+        }
       }
     }
     return result;
   }
 
+  /// 특정 캠페인에 연결된 프로젝트 목록
+  List<Project> getProjectsByCampaignId(String campaignId) =>
+      _projectStore.where((p) => p.campaignId == campaignId).toList();
+
+  /// 팀의 프로젝트 중 캠페인 미연결 목록
+  List<Project> getUnlinkedProjectsForTeam(String teamId) =>
+      _projectStore.where((p) => p.teamId == teamId && p.campaignId == null).toList();
+
+  /// 프로젝트에 캠페인 연결/해제
+  void updateProjectCampaign(String projectId, String? campaignId) {
+    final proj = _projectStore.firstWhere((p) => p.id == projectId, orElse: () => _projectStore.first);
+    proj.campaignId = campaignId;
+    if (_uid != null) {
+      _svc.saveProject(_uid!, proj);
+      _saveToLocal(_uid!);
+    }
+    notifyListeners();
+  }
+
+  /// 전체 태스크 (팀 필터 없음)
   List<TaskWithProject> get allTasksWithProject {
     final result = <TaskWithProject>[];
     for (final proj in _projectStore) {
+      for (final task in proj.tasks) {
+        result.add(TaskWithProject(task: task, project: proj));
+      }
+    }
+    return result;
+  }
+
+  /// 현재 선택된 팀의 태스크만 (대시보드 등 팀별 뷰에서 사용)
+  List<TaskWithProject> get currentTeamTasksWithProject {
+    final projects = currentTeamProjects;
+    final result = <TaskWithProject>[];
+    for (final proj in projects) {
       for (final task in proj.tasks) {
         result.add(TaskWithProject(task: task, project: proj));
       }
@@ -660,29 +946,23 @@ class AppProvider extends ChangeNotifier {
   AppUser? getUserById(String id) =>
       _allUsers.firstWhere((u) => u.id == id, orElse: () => _currentUser);
 
-  // ─── Dashboard Stats ───────────────────────────────────────
-  double get totalBudget => _campaigns.fold(0, (s, c) => s + c.budget);
-  double get totalSpent => _campaigns.fold(0, (s, c) => s + c.spent);
-  double get totalRevenue => _campaigns.fold(0, (s, c) => s + c.revenue);
+  // ─── Dashboard Stats (팀별 필터링 적용) ────────────────────
+  /// 현재 팀 캠페인 기반 예산 합계
+  double get totalBudget => teamCampaigns.fold(0, (s, c) => s + c.budget);
+  double get totalSpent => teamCampaigns.fold(0, (s, c) => s + c.spent);
+  double get totalRevenue => teamCampaigns.fold(0, (s, c) => s + c.revenue);
   double get overallRoi => totalSpent > 0 ? ((totalRevenue - totalSpent) / totalSpent * 100) : 0;
-  /// 현재 선택 팀 KPI 달성률 평균 (팀 없으면 전체 KPI)
+  /// 현재 선택 팀 KPI 달성률 평균
   double get avgKpiAchievement {
     final list = _selectedTeamId != null ? currentTeamKpis : _kpis;
     if (list.isEmpty) return 0;
     return list.fold(0.0, (s, k) => s + k.achievementRate) / list.length;
   }
-  int get activeCampaigns => _campaigns.where((c) => c.status == 'active').length;
+  int get activeCampaigns => teamCampaigns.where((c) => c.status == 'active').length;
   /// 현재 선택 팀 Task 수
-  int get totalTasks {
-    if (_selectedTeamId == null) return _projectStore.fold(0, (s, p) => s + p.tasks.length);
-    return _projectStore.where((p) => p.teamId == _selectedTeamId).fold(0, (s, p) => s + p.tasks.length);
-  }
-  int get doneTasks {
-    if (_selectedTeamId == null) {
-      return _projectStore.fold(0, (s, p) => s + p.tasks.where((t) => t.status == TaskStatus.done).length);
-    }
-    return _projectStore.where((p) => p.teamId == _selectedTeamId).fold(0, (s, p) => s + p.tasks.where((t) => t.status == TaskStatus.done).length);
-  }
+  int get totalTasks => currentTeamTasks.length;
+  int get doneTasks =>
+      currentTeamTasks.where((t) => t.status == TaskStatus.done).length;
 
   List<MonthlyKpiRecord> getMonthlyRecordsForKpi(String kpiId) =>
       _monthlyKpiRecords.where((r) => r.kpiId == kpiId).toList()
@@ -704,11 +984,68 @@ class AppProvider extends ChangeNotifier {
       ..sort((a, b) => (a.monthKey ?? '').compareTo(b.monthKey ?? ''));
   }
 
-  /// 현재 기간의 집계 매출
-  double get periodRevenue => filteredMonthlyData.fold(0, (s, d) => s + d.revenue);
-  double get periodAdSpend => filteredMonthlyData.fold(0, (s, d) => s + d.adSpend);
-  int get periodLeads => filteredMonthlyData.fold(0, (s, d) => s + d.leads);
+  // ─── 팀별 기간 필터링 (캠페인 + 프로젝트/태스크 기반) ────────
+  /// 현재 팀의 기간 매출 (캠페인 기반, 기간 필터 적용)
+  /// MonthlyData에 teamId 필드가 없으므로 팀별 캠페인에서 집계
+  double get periodRevenue {
+    // 1. 현재 팀 캠페인이 있으면 캠페인 매출 합산
+    final campaigns = teamCampaigns;
+    if (campaigns.isNotEmpty) {
+      // 기간 필터: 캠페인 startDate~endDate 범위가 선택 기간과 겹치는 것만
+      final filtered = _filterCampaignsByPeriod(campaigns);
+      if (filtered.isNotEmpty) return filtered.fold(0, (s, c) => s + c.revenue);
+      // 기간 필터 결과가 없으면 전체 팀 캠페인 합산
+      return campaigns.fold(0, (s, c) => s + c.revenue);
+    }
+    // 2. 캠페인 없으면 MonthlyData에서 집계 (fallback)
+    return filteredMonthlyData.fold(0, (s, d) => s + d.revenue);
+  }
+
+  /// 현재 팀의 기간 광고비 (캠페인 기반)
+  double get periodAdSpend {
+    final campaigns = teamCampaigns;
+    if (campaigns.isNotEmpty) {
+      final filtered = _filterCampaignsByPeriod(campaigns);
+      if (filtered.isNotEmpty) return filtered.fold(0, (s, c) => s + c.spent);
+      return campaigns.fold(0, (s, c) => s + c.spent);
+    }
+    return filteredMonthlyData.fold(0, (s, d) => s + d.adSpend);
+  }
+
+  /// 현재 팀의 기간 리드 수 (태스크 체크리스트 기반 또는 MonthlyData fallback)
+  int get periodLeads {
+    // 리드는 MonthlyData에만 있으므로 그대로 유지하되 팀 전환 시 전체 반환
+    return filteredMonthlyData.fold(0, (s, d) => s + d.leads);
+  }
+
   double get periodRoi => periodAdSpend > 0 ? ((periodRevenue - periodAdSpend) / periodAdSpend * 100) : 0;
+
+  /// 기간에 맞는 캠페인 필터링 (startDate~endDate가 선택 기간과 겹침)
+  List<CampaignModel> _filterCampaignsByPeriod(List<CampaignModel> campaigns) {
+    final qMonths = _quarterMonths(_selectedYear, _selectedQuarter);
+    if (qMonths == null) {
+      // 연간 전체: 해당 연도와 겹치는 캠페인
+      final yearStart = DateTime(int.tryParse(_selectedYear) ?? 2025, 1, 1);
+      final yearEnd = DateTime((int.tryParse(_selectedYear) ?? 2025) + 1, 1, 1);
+      return campaigns.where((c) =>
+          c.startDate.isBefore(yearEnd) && c.endDate.isAfter(yearStart)).toList();
+    }
+    // 분기 필터: 해당 분기 월들과 겹치는 캠페인
+    if (qMonths.isEmpty) return campaigns;
+    final firstMonth = qMonths.first; // e.g. '2025-01'
+    final lastMonth = qMonths.last;   // e.g. '2025-03'
+    final parts1 = firstMonth.split('-');
+    final parts2 = lastMonth.split('-');
+    if (parts1.length < 2 || parts2.length < 2) return campaigns;
+    final periodStart = DateTime(
+        int.tryParse(parts1[0]) ?? 2025, int.tryParse(parts1[1]) ?? 1, 1);
+    final endM = int.tryParse(parts2[1]) ?? 3;
+    final endY = int.tryParse(parts2[0]) ?? 2025;
+    final periodEnd = DateTime(endM == 12 ? endY + 1 : endY,
+        endM == 12 ? 1 : endM + 1, 1);
+    return campaigns.where((c) =>
+        c.startDate.isBefore(periodEnd) && c.endDate.isAfter(periodStart)).toList();
+  }
 
   /// 쿼터에 해당하는 monthKey 목록 반환, null이면 연간
   static List<String>? _quarterMonths(String year, String? quarter) {
@@ -724,11 +1061,15 @@ class AppProvider extends ChangeNotifier {
     return months.map((m) => '$year-${m.toString().padLeft(2, '0')}').toList();
   }
 
-  // ─── Risk TOP 5 ────────────────────────────────────────────
+  // ─── Risk TOP 5 (현재 팀 기준) ────────────────────────────
   List<RiskItem> get top5RiskItems {
     final risks = <RiskItem>[];
     final now = DateTime.now();
-    for (final proj in _projectStore) {
+    // 현재 선택된 팀의 프로젝트만 스캔
+    final teamProjects = currentTeamProjects.isNotEmpty
+        ? currentTeamProjects
+        : _projectStore;
+    for (final proj in teamProjects) {
       for (final task in proj.tasks) {
         if (task.status == TaskStatus.done) continue;
         double score = 0;
@@ -756,7 +1097,9 @@ class AppProvider extends ChangeNotifier {
         }
       }
     }
-    for (final kpi in _kpis) {
+    // KPI도 현재 팀 기준으로 필터
+    final teamKpiList = currentTeamKpis.isNotEmpty ? currentTeamKpis : _kpis;
+    for (final kpi in teamKpiList) {
       final rate = kpi.achievementRate;
       final daysLeft = kpi.dueDate.difference(now).inDays;
       double score = 0; final reasons = <String>[];
@@ -794,8 +1137,8 @@ class AppProvider extends ChangeNotifier {
     _defaultSection  = section;
     _currentSection  = section;
     notifyListeners();
-    if (_uid != null && _fs.isAvailable) {
-      await _fs.saveUserPrefs(_uid!, {'defaultSection': section});
+    if (_uid != null && _svc.isAvailable) {
+      await _svc.saveUserPrefs(_uid!, {'defaultSection': section});
     }
   }
 
@@ -811,6 +1154,11 @@ class AppProvider extends ChangeNotifier {
     _selectedProjectId = projectId;
     _selectedTaskId = null;
     _currentSection = 'project_detail';
+    notifyListeners();
+  }
+
+  void selectCampaign(String campaignId) {
+    _selectedProjectId = campaignId; // 캠페인 ID를 selectedProjectId에 임시 저장
     notifyListeners();
   }
 
@@ -848,8 +1196,39 @@ class AppProvider extends ChangeNotifier {
     );
     _teams.add(team);
     if (_uid != null) {
-      _fs.saveTeam(_uid!, team);
+      _svc.saveTeam(_uid!, team);
       _saveToLocal(_uid!); // 로컬 캐시 갱신
+    }
+    notifyListeners();
+  }
+
+  /// 팀 설정 업데이트 (예산, 환율, 고객 파라미터 포함)
+  void updateTeamSettings(String teamId, {
+    double? annualBudget,
+    String? budgetCurrency,
+    double? exchangeRateUsd,
+    double? exchangeRateEur,
+    List<String>? clientIds,
+    String? targetMarket,
+    String? name,
+    String? description,
+  }) {
+    final idx = _teams.indexWhere((t) => t.id == teamId);
+    if (idx < 0) return;
+    final t = _teams[idx];
+    if (annualBudget != null) t.annualBudget = annualBudget;
+    if (budgetCurrency != null) t.budgetCurrency = budgetCurrency;
+    if (exchangeRateUsd != null) t.exchangeRateUsd = exchangeRateUsd;
+    if (exchangeRateEur != null) t.exchangeRateEur = exchangeRateEur;
+    if (clientIds != null) t.clientIds
+      ..clear()
+      ..addAll(clientIds);
+    if (targetMarket != null) t.targetMarket = targetMarket;
+    if (name != null) t.name = name;
+    if (description != null) t.description = description;
+    if (_uid != null) {
+      _svc.saveTeam(_uid!, t);
+      _saveToLocal(_uid!);
     }
     notifyListeners();
   }
@@ -857,13 +1236,27 @@ class AppProvider extends ChangeNotifier {
   void inviteMember(String teamId, String userId, MemberRole role) {
     final idx = _teams.indexWhere((t) => t.id == teamId);
     if (idx < 0) return;
-    final user = _allUsers.firstWhere((u) => u.id == userId, orElse: () => _currentUser);
+
+    // 이미 팀 멤버인지 확인
+    if (_teams[idx].getMember(userId) != null) {
+      if (kDebugMode) debugPrint('[inviteMember] User $userId is already a member of $teamId');
+      return;
+    }
+
+    // allUsers에서 찾되, 없으면 null 반환 (잘못된 currentUser fallback 제거)
+    final user = _allUsers.firstWhere(
+      (u) => u.id == userId,
+      orElse: () => _currentUser,
+    );
+
     _teams[idx].members.add(TeamMember(
       id: 'tm_${DateTime.now().millisecondsSinceEpoch}',
-      user: user, role: role, joinedAt: DateTime.now(),
+      user: user,
+      role: role,
+      joinedAt: DateTime.now(),
     ));
     if (_uid != null) {
-      _fs.saveTeam(_uid!, _teams[idx]);
+      _svc.saveTeam(_uid!, _teams[idx]);
       _saveToLocal(_uid!);
     }
     notifyListeners();
@@ -876,25 +1269,45 @@ class AppProvider extends ChangeNotifier {
     required String name,
     required MemberRole role,
   }) {
-    // allUsers에 없으면 새 유저 생성
-    final existing = _allUsers.firstWhere(
-      (u) => u.email.toLowerCase() == email.toLowerCase(),
-      orElse: () => AppUser(id: '', name: '', email: '', avatarInitials: '', avatarColor: '#999'),
+    final teamIdx = _teams.indexWhere((t) => t.id == teamId);
+    if (teamIdx < 0) return;
+
+    // 이미 팀 내에 해당 이메일이 있는지 확인
+    final alreadyInTeam = _teams[teamIdx].members.any(
+      (m) => m.user.email.toLowerCase() == email.toLowerCase(),
     );
-    final AppUser newUser;
-    if (existing.id.isEmpty) {
+    if (alreadyInTeam) {
+      if (kDebugMode) debugPrint('[inviteMemberByEmail] $email is already in team $teamId');
+      return;
+    }
+
+    // allUsers에 없으면 새 유저 생성
+    AppUser newUser;
+    final existingIdx = _allUsers.indexWhere(
+      (u) => u.email.toLowerCase() == email.toLowerCase(),
+    );
+    if (existingIdx < 0) {
+      // 이니셜 생성 (한글 2자 or 영문 첫 2글자)
+      String initials;
+      if (name.length >= 2) {
+        initials = name.substring(0, 2);
+      } else {
+        initials = name;
+      }
       newUser = AppUser(
         id: 'u_${DateTime.now().millisecondsSinceEpoch}',
         name: name,
         email: email,
-        avatarInitials: name.length >= 2 ? name.substring(0, 2) : name,
+        avatarInitials: initials,
         avatarColor: _randomColor(),
         jobTitle: JobTitle.member,
         department: '',
       );
       _allUsers.add(newUser);
+      // ✅ Firebase에 멤버 저장 (신규 유저만)
+      if (_uid != null) _svc.saveMember(_uid!, newUser);
     } else {
-      newUser = existing;
+      newUser = _allUsers[existingIdx];
     }
     inviteMember(teamId, newUser.id, role);
   }
@@ -905,14 +1318,29 @@ class AppProvider extends ChangeNotifier {
   }
 
   void updateMemberRole(String teamId, String memberId, MemberRole newRole) {
-    final team = _teams.firstWhere((t) => t.id == teamId, orElse: () => _teams.first);
+    final teamIdx = _teams.indexWhere((t) => t.id == teamId);
+    if (teamIdx < 0) return;
+    final team = _teams[teamIdx];
     final idx = team.members.indexWhere((m) => m.id == memberId);
-    if (idx >= 0) { team.members[idx] = team.members[idx].copyWith(role: newRole); notifyListeners(); }
+    if (idx >= 0) {
+      team.members[idx] = team.members[idx].copyWith(role: newRole);
+      if (_uid != null) {
+        _svc.saveTeam(_uid!, team);
+        _saveToLocal(_uid!);
+      }
+      notifyListeners();
+    }
   }
 
   void removeMember(String teamId, String memberId) {
-    final team = _teams.firstWhere((t) => t.id == teamId, orElse: () => _teams.first);
+    final teamIdx = _teams.indexWhere((t) => t.id == teamId);
+    if (teamIdx < 0) return;
+    final team = _teams[teamIdx];
     team.members.removeWhere((m) => m.id == memberId);
+    if (_uid != null) {
+      _svc.saveTeam(_uid!, team);
+      _saveToLocal(_uid!);
+    }
     notifyListeners();
   }
 
@@ -923,11 +1351,11 @@ class AppProvider extends ChangeNotifier {
     final projIds = List<String>.from(team.projectIds);
     for (final pid in projIds) {
       _projectStore.removeWhere((p) => p.id == pid);
-      if (_uid != null) await _fs.deleteProject(_uid!, pid);
+      if (_uid != null) await _svc.deleteProject(_uid!, pid);
     }
     // 팀 삭제
     _teams.removeWhere((t) => t.id == teamId);
-    if (_uid != null) await _fs.deleteTeam(_uid!, teamId);
+    if (_uid != null) await _svc.deleteTeam(_uid!, teamId);
     // 선택된 팀/프로젝트 초기화
     if (_selectedTeamId == teamId) {
       _selectedTeamId = _teams.isNotEmpty ? _teams.first.id : null;
@@ -956,9 +1384,9 @@ class AppProvider extends ChangeNotifier {
     final team = _teams.firstWhere((t) => t.id == teamId, orElse: () => _teams.first);
     team.projectIds.add(proj.id);
     if (_uid != null) {
-      _fs.saveProject(_uid!, proj);        // 개인 store 저장
-      _fs.saveTeam(_uid!, team);
-      _fs.saveSharedProject(teamId, proj); // 팀 공유 저장 (팀원 동기화)
+      _svc.saveProject(_uid!, proj);        // 개인 store 저장
+      _svc.saveTeam(_uid!, team);
+      _svc.saveSharedProject(teamId, proj); // 팀 공유 저장 (팀원 동기화)
     }
     notifyListeners();
     return proj;
@@ -970,8 +1398,8 @@ class AppProvider extends ChangeNotifier {
     if (idx < 0) return;
     _projectStore[idx] = updated;
     if (_uid != null) {
-      await _fs.saveProject(_uid!, updated);          // 개인 store
-      await _fs.saveSharedProject(updated.teamId, updated); // 팀 공유
+      await _svc.saveProject(_uid!, updated);          // 개인 store
+      await _svc.saveSharedProject(updated.teamId, updated); // 팀 공유
     }
     notifyListeners();
   }
@@ -981,10 +1409,10 @@ class AppProvider extends ChangeNotifier {
     // 팀의 projectIds에서도 제거
     for (final team in _teams) {
       team.projectIds.remove(projectId);
-      if (_uid != null) await _fs.saveTeam(_uid!, team);
+      if (_uid != null) await _svc.saveTeam(_uid!, team);
     }
     _projectStore.removeWhere((p) => p.id == projectId);
-    if (_uid != null) await _fs.deleteProject(_uid!, projectId);
+    if (_uid != null) await _svc.deleteProject(_uid!, projectId);
     if (_selectedProjectId == projectId) _selectedProjectId = null;
     notifyListeners();
   }
@@ -1002,22 +1430,22 @@ class AppProvider extends ChangeNotifier {
       // Firebase에서 모든 데이터 삭제
       final futures = <Future>[];
       for (final t in List<Team>.from(_teams)) {
-        futures.add(_fs.deleteTeam(_uid!, t.id));
+        futures.add(_svc.deleteTeam(_uid!, t.id));
       }
       for (final p in List<Project>.from(_projectStore)) {
-        futures.add(_fs.deleteProject(_uid!, p.id));
+        futures.add(_svc.deleteProject(_uid!, p.id));
       }
       for (final k in List<KpiModel>.from(_kpis)) {
-        futures.add(_fs.deleteKpi(_uid!, k.id));
+        futures.add(_svc.deleteKpi(_uid!, k.id));
       }
       for (final c in List<CampaignModel>.from(_campaigns)) {
-        futures.add(_fs.deleteCampaign(_uid!, c.id));
+        futures.add(_svc.deleteCampaign(_uid!, c.id));
       }
       for (final r in List<MarketingRegion>.from(_regions)) {
-        futures.add(_fs.deleteRegion(_uid!, r.id));
+        futures.add(_svc.deleteRegion(_uid!, r.id));
       }
       for (final c in List<ClientAccount>.from(_clients)) {
-        futures.add(_fs.deleteClient(_uid!, c.id));
+        futures.add(_svc.deleteClient(_uid!, c.id));
       }
       await Future.wait(futures);
     }
@@ -1052,7 +1480,7 @@ class AppProvider extends ChangeNotifier {
     );
     final proj = _projectStore.firstWhere((p) => p.id == projectId, orElse: () => _projectStore.first);
     proj.tasks.add(task);
-    if (_uid != null) _fs.saveProject(_uid!, proj);
+    if (_uid != null) _svc.saveProject(_uid!, proj);
     notifyListeners();
     return task;
   }
@@ -1060,10 +1488,84 @@ class AppProvider extends ChangeNotifier {
   void updateTaskStatus(String projectId, String taskId, TaskStatus status) {
     final proj = _projectStore.firstWhere((p) => p.id == projectId, orElse: () => _projectStore.first);
     final task = proj.tasks.firstWhere((t) => t.id == taskId);
+    final prevStatus = task.status;
     task.status = status;
     task.updatedAt = DateTime.now();
-    if (_uid != null) _fs.saveProject(_uid!, proj);
+    if (_uid != null) _svc.saveProject(_uid!, proj);
+
+    // ── 태스크 완료 시 담당자 개인 KPI 자동 업데이트 ──────────
+    if (status == TaskStatus.done && prevStatus != TaskStatus.done) {
+      _autoUpdatePersonalKpiOnTaskDone(proj, task);
+    }
+    // 완료 → 되돌림 시 KPI 역산
+    if (prevStatus == TaskStatus.done && status != TaskStatus.done) {
+      _autoRevertPersonalKpiOnTaskUndone(proj, task);
+    }
+
     notifyListeners();
+  }
+
+  /// 태스크 완료 시 담당자의 개인 KPI current 값 증가
+  void _autoUpdatePersonalKpiOnTaskDone(Project proj, TaskDetail task) {
+    for (final uid in task.assigneeIds) {
+      // 해당 담당자의 개인 KPI 중 이 프로젝트/캠페인과 연결된 것
+      final personalKpis = _kpis.where((k) =>
+        !k.isTeamKpi &&
+        k.assignedTo == uid &&
+        (k.projectId == proj.id || (proj.campaignId != null && k.campaignId == proj.campaignId))
+      ).toList();
+
+      for (final kpi in personalKpis) {
+        final idx = _kpis.indexWhere((k) => k.id == kpi.id);
+        if (idx < 0) continue;
+        // KPI 단위에 따라 증가 방식 결정
+        final increment = _calcKpiIncrement(kpi, task);
+        final newCurrent = (kpi.current + increment).clamp(0.0, kpi.target * 2);
+        _kpis[idx] = kpi.copyWith(current: newCurrent);
+        if (_uid != null) _svc.saveKpi(_uid!, _kpis[idx]);
+      }
+    }
+  }
+
+  /// 태스크 완료 취소 시 KPI 역산
+  void _autoRevertPersonalKpiOnTaskUndone(Project proj, TaskDetail task) {
+    for (final uid in task.assigneeIds) {
+      final personalKpis = _kpis.where((k) =>
+        !k.isTeamKpi &&
+        k.assignedTo == uid &&
+        (k.projectId == proj.id || (proj.campaignId != null && k.campaignId == proj.campaignId))
+      ).toList();
+
+      for (final kpi in personalKpis) {
+        final idx = _kpis.indexWhere((k) => k.id == kpi.id);
+        if (idx < 0) continue;
+        final increment = _calcKpiIncrement(kpi, task);
+        final newCurrent = (kpi.current - increment).clamp(0.0, kpi.target * 2);
+        _kpis[idx] = kpi.copyWith(current: newCurrent);
+        if (_uid != null) _svc.saveKpi(_uid!, _kpis[idx]);
+      }
+    }
+  }
+
+  /// KPI 증가량 계산 (단위별 처리)
+  double _calcKpiIncrement(KpiModel kpi, TaskDetail task) {
+    final unit = kpi.unit.toLowerCase();
+    // 건수 단위: 태스크 1개 = 1 증가
+    if (unit.contains('건') || unit.contains('개') || unit.contains('회') ||
+        unit.contains('task') || unit.contains('count')) {
+      return 1.0;
+    }
+    // 진행률 단위: 체크리스트 완료율 반영
+    if (unit.contains('%') || unit.contains('율') || unit.contains('률')) {
+      return task.checklistProgress;
+    }
+    // 예산/금액 단위: 태스크의 집행 비용 반영
+    if (unit.contains('원') || unit.contains('usd') || unit.contains('krw') ||
+        unit.contains('금액') || unit.contains('매출')) {
+      return task.checklistTotalExecuted;
+    }
+    // 기본: 1 증가
+    return 1.0;
   }
 
   void toggleChecklistItem(String projectId, String taskId, String itemId) {
@@ -1187,7 +1689,7 @@ class AppProvider extends ChangeNotifier {
         : kpi;
     _kpis.add(kpiWithTeam);
     if (_uid != null) {
-      _fs.saveKpi(_uid!, kpiWithTeam);
+      _svc.saveKpi(_uid!, kpiWithTeam);
       _saveToLocal(_uid!);
     }
     notifyListeners();
@@ -1197,7 +1699,7 @@ class AppProvider extends ChangeNotifier {
     if (idx >= 0) {
       _kpis[idx] = updated;
       if (_uid != null) {
-        _fs.saveKpi(_uid!, updated);
+        _svc.saveKpi(_uid!, updated);
         _saveToLocal(_uid!);
       }
       notifyListeners();
@@ -1206,9 +1708,30 @@ class AppProvider extends ChangeNotifier {
   void deleteKpi(String id) {
     _kpis.removeWhere((k) => k.id == id);
     if (_uid != null) {
-      _fs.deleteKpi(_uid!, id);
+      _svc.deleteKpi(_uid!, id);
       _saveToLocal(_uid!);
     }
+    notifyListeners();
+  }
+
+  /// KPI를 프로젝트에 연결 (KpiModel.projectId 업데이트)
+  void linkKpiToProject(String kpiId, String projectId) {
+    final idx = _kpis.indexWhere((k) => k.id == kpiId);
+    if (idx < 0) return;
+    final old = _kpis[idx];
+    _kpis[idx] = old.copyWith(projectId: projectId);
+    if (_uid != null) _svc.saveKpi(_uid!, _kpis[idx]);
+    notifyListeners();
+  }
+
+  /// KPI와 프로젝트 연결 해제
+  void unlinkKpiFromProject(String kpiId, String projectId) {
+    final idx = _kpis.indexWhere((k) => k.id == kpiId);
+    if (idx < 0) return;
+    final old = _kpis[idx];
+    if (old.projectId != projectId) return;
+    _kpis[idx] = old.copyWith(projectId: null);
+    if (_uid != null) _svc.saveKpi(_uid!, _kpis[idx]);
     notifyListeners();
   }
 
@@ -1221,7 +1744,7 @@ class AppProvider extends ChangeNotifier {
     );
     proj.tasks.removeWhere((t) => t.id == taskId);
     if (_selectedTaskId == taskId) _selectedTaskId = null;
-    if (_uid != null) _fs.saveProject(_uid!, proj);
+    if (_uid != null) _svc.saveProject(_uid!, proj);
     notifyListeners();
   }
 
@@ -1229,7 +1752,6 @@ class AppProvider extends ChangeNotifier {
   /// columns: name, current, target, unit, category, date
   List<String> bulkAddKpisFromCsv(List<Map<String, String>> rows) {
     final errors = <String>[];
-    final categories = ['매출', 'ROI', 'ROAS', '리드', 'CTR', 'SEO', '콘텐츠', 'SNS', '이메일', '광고', '전환', '기타'];
     int added = 0;
 
     for (int i = 0; i < rows.length; i++) {
@@ -1239,21 +1761,44 @@ class AppProvider extends ChangeNotifier {
         errors.add('행 ${i+2}: 이름(name)이 비어 있습니다');
         continue;
       }
-      final target = double.tryParse(row['target'] ?? '');
-      if (target == null) {
-        errors.add('행 ${i+2}: 목표값(target)이 유효하지 않습니다');
-        continue;
-      }
-      final current = double.tryParse(row['current'] ?? '') ?? 0;
-      final unit = (row['unit'] ?? '건').trim();
-      final rawCat = (row['category'] ?? '기타').trim();
-      final category = categories.contains(rawCat) ? rawCat : '기타';
 
+      // target이 없거나 0이어도 허용 (나중에 수정 가능)
+      final target = double.tryParse(row['target']?.replaceAll(',', '') ?? '') ?? 0;
+      final current = double.tryParse(row['current']?.replaceAll(',', '') ?? '') ?? 0;
+      final unit = (row['unit'] ?? '건').trim();
+
+      // 카테고리: 원본 값 그대로 허용 (고정 목록 제한 제거)
+      final category = (row['category'] ?? '기타').trim().isEmpty ? '기타' : (row['category'] ?? '기타').trim();
+
+      // 날짜 파싱
       DateTime dueDate = DateTime(DateTime.now().year, 12, 31);
-      final dateStr = row['date'] ?? row['duedate'] ?? row['due_date'] ?? '';
+      final dateStr = (row['date'] ?? row['duedate'] ?? row['due_date'] ?? '').trim();
       if (dateStr.isNotEmpty) {
         final parsed = DateTime.tryParse(dateStr);
         if (parsed != null) dueDate = parsed;
+      }
+
+      // 연도별/분기별 목표 파싱 (CSV에 y2025, y2026 컬럼이 있으면)
+      final Map<String, double> yearlyTargets = {};
+      final Map<String, double> quarterlyTargets = {};
+      for (final key in row.keys) {
+        // y2025, y2026 형태
+        if (RegExp(r'^y\d{4}$').hasMatch(key)) {
+          final yr = key.substring(1);
+          final val = double.tryParse(row[key]?.replaceAll(',', '') ?? '');
+          if (val != null) yearlyTargets[yr] = val;
+        }
+        // q1_2025, 2025q1, 2025_q1 형태
+        final qMatch = RegExp(r'(?:q(\d)_?(\d{4})|(\d{4})_?q(\d))', caseSensitive: false).firstMatch(key);
+        if (qMatch != null) {
+          final q = qMatch.group(1) ?? qMatch.group(4) ?? '';
+          final yr = qMatch.group(2) ?? qMatch.group(3) ?? '';
+          if (q.isNotEmpty && yr.isNotEmpty) {
+            final qKey = '$yr-Q$q';
+            final val = double.tryParse(row[key]?.replaceAll(',', '') ?? '');
+            if (val != null) quarterlyTargets[qKey] = val;
+          }
+        }
       }
 
       final kpi = KpiModel(
@@ -1267,9 +1812,11 @@ class AppProvider extends ChangeNotifier {
         isTeamKpi: true,
         dueDate: dueDate,
         teamId: _selectedTeamId,
+        yearlyTargets: yearlyTargets,
+        quarterlyTargets: quarterlyTargets,
       );
       _kpis.add(kpi);
-      if (_uid != null) _fs.saveKpi(_uid!, kpi);
+      if (_uid != null) _svc.saveKpi(_uid!, kpi);
       added++;
     }
 
@@ -1282,7 +1829,7 @@ class AppProvider extends ChangeNotifier {
   void deleteKpisBulk(List<String> ids) {
     _kpis.removeWhere((k) => ids.contains(k.id));
     if (_uid != null) {
-      for (final id in ids) _fs.deleteKpi(_uid!, id);
+      for (final id in ids) _svc.deleteKpi(_uid!, id);
       _saveToLocal(_uid!);
     }
     notifyListeners();
@@ -1296,7 +1843,7 @@ class AppProvider extends ChangeNotifier {
     );
     proj.tasks.removeWhere((t) => taskIds.contains(t.id));
     if (taskIds.contains(_selectedTaskId)) _selectedTaskId = null;
-    if (_uid != null) _fs.saveProject(_uid!, proj);
+    if (_uid != null) _svc.saveProject(_uid!, proj);
     notifyListeners();
   }
 
@@ -1953,40 +2500,144 @@ class AppProvider extends ChangeNotifier {
   // ─── 권역 CRUD ────────────────────────────────────────────
   void addRegion(MarketingRegion r) {
     _regions.add(r);
-    if (_uid != null) _fs.saveRegion(_uid!, r);
+    if (_uid != null) _svc.saveRegion(_uid!, r);
     notifyListeners();
   }
   void updateRegion(MarketingRegion r) {
     final i = _regions.indexWhere((x) => x.id == r.id);
     if (i >= 0) {
       _regions[i] = r;
-      if (_uid != null) _fs.saveRegion(_uid!, r);
+      if (_uid != null) _svc.saveRegion(_uid!, r);
       notifyListeners();
     }
   }
   void deleteRegion(String id) {
     _regions.removeWhere((r) => r.id == id);
-    if (_uid != null) _fs.deleteRegion(_uid!, id);
+    if (_uid != null) _svc.deleteRegion(_uid!, id);
     notifyListeners();
   }
 
   // ─── 고객사 CRUD ──────────────────────────────────────────
+
+  /// CSV 벌크 업로드: 중복 제거 후 일괄 등록, KPI/캠페인 자동 연결
+  /// 반환값: {'added': int, 'skipped': int}
+  Map<String, int> bulkAddClients(List<ClientAccount> incoming) {
+    int added = 0;
+    int skipped = 0;
+
+    // 기존 ID/바이어코드 셋
+    final existingIds = _clients.map((c) => c.id).toSet();
+    final existingBuyerCodes = _clients
+        .where((c) => c.buyerCode != null)
+        .map((c) => c.buyerCode!)
+        .toSet();
+
+    for (final client in incoming) {
+      // 중복 확인
+      if (existingIds.contains(client.id) ||
+          (client.buyerCode != null && existingBuyerCodes.contains(client.buyerCode))) {
+        skipped++;
+        continue;
+      }
+
+      // teamId 기본값 설정 (선택된 팀)
+      final enriched = client.teamId != null
+          ? client
+          : ClientAccount(
+              id: client.id,
+              name: client.name,
+              buyerCode: client.buyerCode,
+              country: client.country,
+              countryName: client.countryName,
+              region: client.region,
+              regionEn: client.regionEn,
+              industry: client.industry,
+              contactName: client.contactName,
+              contactEmail: client.contactEmail,
+              contactPhone: client.contactPhone,
+              note: client.note,
+              isActive: client.isActive,
+              teamId: _selectedTeamId,
+              salesOrg: client.salesOrg,
+              salesOrgName: client.salesOrgName,
+              distributionChannel: client.distributionChannel,
+              currency: client.currency,
+              salesZone: client.salesZone,
+              incoterms: client.incoterms,
+              incotermsDesc: client.incotermsDesc,
+              soldToParty: client.soldToParty,
+              soldToPartyName: client.soldToPartyName,
+              billToParty: client.billToParty,
+              billToPartyName: client.billToPartyName,
+              shipToParty: client.shipToParty,
+              shipToPartyName: client.shipToPartyName,
+              settlementType: client.settlementType,
+              settlementTypeDesc: client.settlementTypeDesc,
+              pbOrderType: client.pbOrderType,
+              revenue: client.revenue,
+              adSpend: client.adSpend,
+              createdAt: client.createdAt,
+            );
+
+      _clients.add(enriched);
+      existingIds.add(enriched.id);
+      if (enriched.buyerCode != null) existingBuyerCodes.add(enriched.buyerCode!);
+
+      if (_uid != null) _svc.saveClient(_uid!, enriched);
+      added++;
+    }
+
+    // 업로드 후 자동 연결: 같은 국가/권역의 활성 캠페인에 고객사 태그 자동 매핑
+    _autoLinkClientsToTasks(incoming.where((c) => existingIds.contains(c.id)).toList());
+
+    if (_uid != null) _saveToLocal(_uid!);
+    notifyListeners();
+    return {'added': added, 'skipped': skipped};
+  }
+
+  /// 업로드된 고객사를 동일 국가/권역 태스크에 자동 연결
+  void _autoLinkClientsToTasks(List<ClientAccount> newClients) {
+    if (newClients.isEmpty) return;
+    bool changed = false;
+    for (final proj in _projectStore) {
+      for (final task in proj.tasks) {
+        for (final client in newClients) {
+          // 태스크의 defaultCountry나 defaultRegion이 고객사와 매치되면 연결
+          final countryMatch = client.country != null &&
+              task.defaultCountry?.toUpperCase() == client.country?.toUpperCase();
+          final regionMatch = client.region != null &&
+              task.defaultRegion?.contains(client.region ?? '') == true;
+          if ((countryMatch || regionMatch) &&
+              !task.targetClientIds.contains(client.id)) {
+            task.targetClientIds.add(client.id);
+            changed = true;
+          }
+        }
+      }
+    }
+    if (changed && _uid != null) {
+      for (final proj in _projectStore) {
+        _svc.saveProject(_uid!, proj);
+      }
+    }
+  }
+
   void addClient(ClientAccount c) {
     _clients.add(c);
-    if (_uid != null) _fs.saveClient(_uid!, c);
+    if (_uid != null) _svc.saveClient(_uid!, c);
     notifyListeners();
   }
   void updateClient(ClientAccount c) {
     final i = _clients.indexWhere((x) => x.id == c.id);
     if (i >= 0) {
       _clients[i] = c;
-      if (_uid != null) _fs.saveClient(_uid!, c);
+      if (_uid != null) _svc.saveClient(_uid!, c);
       notifyListeners();
     }
   }
   void deleteClient(String id) {
     _clients.removeWhere((c) => c.id == id);
-    if (_uid != null) _fs.deleteClient(_uid!, id);
+    if (_uid != null) _svc.deleteClient(_uid!, id);
     notifyListeners();
   }
 
@@ -2058,8 +2709,8 @@ class AppProvider extends ChangeNotifier {
         }
         // Firestore 즉시 저장
         if (_uid != null) {
-          _fs.saveProject(_uid!, proj);
-          _fs.saveSharedProject(proj.teamId, proj);
+          _svc.saveProject(_uid!, proj);
+          _svc.saveSharedProject(proj.teamId, proj);
         }
         notifyListeners();
         return;
@@ -2068,33 +2719,36 @@ class AppProvider extends ChangeNotifier {
   }
 
   // ─── 태스크 전체 편집 ─────────────────────────────────────
-  void updateTask(String projectId, String taskId, {
+  void updateTask(String projectId, TaskDetail taskOrId, {
     String? title, String? description, TaskStatus? status, TaskPriority? priority,
     DateTime? dueDate, DateTime? startDate, List<String>? assigneeIds,
     List<String>? tags, String? kpiId, StrategyPillar? pillar,
   }) {
+    final taskId = taskOrId.id;
     for (final proj in _projectStore) {
       if (proj.id != projectId) continue;
       for (int i = 0; i < proj.tasks.length; i++) {
         if (proj.tasks[i].id != taskId) continue;
+        // taskOrId 자체를 직접 넣어 (이미 수정된 TaskDetail 객체)
+        proj.tasks[i] = taskOrId;
         final t = proj.tasks[i];
+        // 추가 named 파라미터로 overwrite
         if (title != null) t.title = title;
         if (description != null) t.description = description;
         if (status != null) t.status = status;
         if (priority != null) t.priority = priority;
         if (dueDate != null) t.dueDate = dueDate;
         if (startDate != null) t.startDate = startDate;
-        if (assigneeIds != null) {
-          t.assigneeIds.clear();
-          t.assigneeIds.addAll(assigneeIds);
-        }
-        if (tags != null) {
-          t.tags.clear();
-          t.tags.addAll(tags);
-        }
+        if (assigneeIds != null) { t.assigneeIds.clear(); t.assigneeIds.addAll(assigneeIds); }
+        if (tags != null) { t.tags.clear(); t.tags.addAll(tags); }
         if (kpiId != null) t.kpiId = kpiId;
         if (pillar != null) t.pillar = pillar;
         t.updatedAt = DateTime.now();
+        // ✅ Firebase에 프로젝트 저장
+        if (_uid != null) {
+          _svc.saveProject(_uid!, proj);
+          _saveToLocal(_uid!);
+        }
         notifyListeners();
         return;
       }

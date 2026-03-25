@@ -39,6 +39,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get continueWithWhatsApp => 'WhatsApp으로 계속하기';
 
   @override
+  String get continueWithMicrosoft => 'Microsoft로 계속하기';
+
+  @override
+  String get continueWithApple => 'Apple로 계속하기';
+
+  @override
   String get continueWithEmail => '이메일로 계속하기';
 
   @override

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/app_provider.dart';
+import '../providers/auth_provider.dart';
 import '../models/models.dart';
 import '../screens/dashboard/overview_page.dart';
 import '../screens/team/team_list_page.dart';
@@ -18,6 +19,7 @@ import 'ai_developer_panel.dart';
 import 'notification_panel.dart';
 import 'dm_panel.dart';
 import 'user_profile_dialog.dart';
+import 'account_switcher_dialog.dart';
 
 class DesktopShell extends StatelessWidget {
   const DesktopShell({super.key});
@@ -611,18 +613,36 @@ class _TeamNavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final teamColor = Color(int.parse('0xFF${team.colorHex.substring(1)}'));
     final projects = provider.getProjectsForTeam(team.id);
+    // 현재 섹션이 대시보드/KPI/캠페인/퍼널 등 팀 독립 섹션인지 확인
+    final isTeamDataSection = ['dashboard', 'kpi', 'campaign', 'funnel',
+        'geo_analysis', 'exchange_rate', 'app_settings'].contains(provider.currentSection);
+    // 이 팀이 현재 선택된 팀인지 (섹션과 무관하게)
+    final isCurrentTeam = provider.selectedTeamId == team.id;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         InkWell(
-          onTap: onTap,
+          onTap: () {
+            if (isTeamDataSection) {
+              // 대시보드/KPI/캠페인에서는 섹션 유지하며 팀만 전환
+              provider.switchTeam(team.id);
+            } else {
+              // 팀 상세/프로젝트 상세 등에서는 기존 방식 유지
+              onTap();
+            }
+          },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
             decoration: BoxDecoration(
-              color: isSelected ? teamColor.withValues(alpha: 0.15) : Colors.transparent,
+              color: isCurrentTeam
+                  ? teamColor.withValues(alpha: isTeamDataSection ? 0.2 : 0.15)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
+              border: isCurrentTeam && isTeamDataSection
+                  ? Border.all(color: teamColor.withValues(alpha: 0.4), width: 1)
+                  : null,
             ),
             child: Row(
               children: [
@@ -634,14 +654,25 @@ class _TeamNavItem extends StatelessWidget {
                   child: Text(
                     team.name,
                     style: TextStyle(
-                      color: isSelected ? teamColor : AppTheme.textSecondary,
+                      color: isCurrentTeam ? teamColor : AppTheme.textSecondary,
                       fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight: isCurrentTeam ? FontWeight.w600 : FontWeight.normal,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Text('${team.members.length}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                // 현재 섹션에서 이 팀이 선택되면 활성 배지 표시
+                if (isCurrentTeam && isTeamDataSection)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: teamColor.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text('●', style: TextStyle(color: teamColor, fontSize: 7)),
+                  )
+                else
+                  Text('${team.members.length}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
               ],
             ),
           ),
@@ -733,32 +764,164 @@ class _NavFooter extends StatelessWidget {
         ? Color(int.parse('0xFF${user.avatarColor!.substring(1)}'))
         : AppTheme.mintPrimary;
 
-    return InkWell(
-      onTap: () => UserProfileDialog.show(context),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 15,
-              backgroundColor: color.withValues(alpha: 0.3),
-              child: Text(user.avatarInitials, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Column(
+        children: [
+          // 프로필 정보 행
+          InkWell(
+            onTap: () => UserProfileDialog.show(context),
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(
                 children: [
-                  Text(user.displayName, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
-                  Text(_jobTitleLabel(user.jobTitle), style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                  Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 15,
+                        backgroundColor: color.withValues(alpha: 0.3),
+                        child: Text(
+                          user.avatarInitials,
+                          style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      // 온라인 상태 표시
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00E676),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppTheme.bgDark, width: 1.2),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user.displayName,
+                          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          _jobTitleLabel(user.jobTitle),
+                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.edit_outlined, color: AppTheme.textMuted, size: 14),
                 ],
               ),
             ),
-            const Icon(Icons.edit_outlined, color: AppTheme.textMuted, size: 14),
-          ],
-        ),
+          ),
+          const SizedBox(height: 4),
+          // 계정 전환 + 로그아웃 버튼 행
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => AccountSwitcherDialog.show(context),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppTheme.mintPrimary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppTheme.mintPrimary.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.manage_accounts_rounded,
+                            color: AppTheme.mintPrimary, size: 13),
+                        SizedBox(width: 4),
+                        Text('계정 관리',
+                            style: TextStyle(
+                                color: AppTheme.mintPrimary,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              InkWell(
+                onTap: () => _confirmSignOut(context),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.redAccent.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: const Icon(Icons.logout_rounded,
+                      color: Colors.redAccent, size: 14),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
+  }
+
+  Future<void> _confirmSignOut(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+            SizedBox(width: 10),
+            Text('로그아웃', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+          ],
+        ),
+        content: const Text(
+          '현재 계정에서 로그아웃합니다.\n저장된 다른 계정은 유지됩니다.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('취소', style: TextStyle(color: AppTheme.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('로그아웃', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      final app = context.read<AppProvider>();
+      final auth = context.read<AuthProvider>();
+      app.clearUid();
+      await auth.signOut();
+    }
   }
 }
 

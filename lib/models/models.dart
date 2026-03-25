@@ -424,6 +424,14 @@ class Team {
   final List<String> projectIds;
   final DateTime createdAt;
 
+  // ── 팀별 예산/환율/고객 파라미터 ──────────────────────────
+  double? annualBudget;          // 팀 연간 예산 (KRW)
+  String budgetCurrency;         // 기본 통화 (예: 'KRW', 'USD')
+  double exchangeRateUsd;        // USD→KRW 환율
+  double exchangeRateEur;        // EUR→KRW 환율
+  List<String> clientIds;        // 연결 고객사 ID 목록
+  String? targetMarket;          // 타겟 시장/권역
+
   Team({
     required this.id,
     required this.name,
@@ -433,7 +441,13 @@ class Team {
     required this.members,
     required this.projectIds,
     required this.createdAt,
-  });
+    this.annualBudget,
+    this.budgetCurrency = 'KRW',
+    this.exchangeRateUsd = 1350.0,
+    this.exchangeRateEur = 1480.0,
+    List<String>? clientIds,
+    this.targetMarket,
+  }) : clientIds = clientIds ?? [];
 
   TeamMember? getMember(String userId) =>
       members.where((m) => m.user.id == userId).firstOrNull;
@@ -454,6 +468,12 @@ class Team {
     }).toList(),
     'projectIds': projectIds,
     'createdAt': createdAt.toIso8601String(),
+    'annualBudget': annualBudget,
+    'budgetCurrency': budgetCurrency,
+    'exchangeRateUsd': exchangeRateUsd,
+    'exchangeRateEur': exchangeRateEur,
+    'clientIds': clientIds,
+    'targetMarket': targetMarket,
   };
 
   factory Team.fromJson(Map<String, dynamic> j) {
@@ -477,6 +497,12 @@ class Team {
       members: members,
       projectIds: List<String>.from(j['projectIds'] as List? ?? []),
       createdAt: DateTime.parse(j['createdAt'] as String),
+      annualBudget: (j['annualBudget'] as num?)?.toDouble(),
+      budgetCurrency: j['budgetCurrency'] as String? ?? 'KRW',
+      exchangeRateUsd: (j['exchangeRateUsd'] as num?)?.toDouble() ?? 1350.0,
+      exchangeRateEur: (j['exchangeRateEur'] as num?)?.toDouble() ?? 1480.0,
+      clientIds: List<String>.from(j['clientIds'] as List? ?? []),
+      targetMarket: j['targetMarket'] as String?,
     );
   }
 }
@@ -803,6 +829,16 @@ class TaskDetail {
   double? taskAllocatedBudget;  // 태스크 전체 할당 예산 (원 기준)
   CurrencyCode? taskBudgetCurrency; // 태스크 예산 통화
 
+  // ── 전략 연결 & 멀티 대상 권역/국가/고객 ────────────────
+  List<String> targetRegions;    // 대상 권역 목록 (예: ['동남아', '중동'])
+  List<String> targetCountries;  // 대상 국가 목록 (예: ['KR', 'SG', 'TH'])
+  List<String> targetClientIds;  // 연결 고객사 ID 목록
+  String? strategyFrameworkId;   // 연결된 전략 프레임워크 ID
+  String? strategyObjectiveId;   // 연결된 전략과제 ID
+  String? strategyActionId;      // 연결된 실행과제 ID
+  String? deliverableId;         // 연결된 Deliverable ID
+  String? campaignId;            // 연결된 캠페인 ID
+
   TaskDetail({
     required this.id,
     required this.title,
@@ -837,9 +873,20 @@ class TaskDetail {
     this.defaultCountry,
     this.taskAllocatedBudget,
     this.taskBudgetCurrency,
+    List<String>? targetRegions,
+    List<String>? targetCountries,
+    List<String>? targetClientIds,
+    this.strategyFrameworkId,
+    this.strategyObjectiveId,
+    this.strategyActionId,
+    this.deliverableId,
+    this.campaignId,
   }) : kpiTargets = kpiTargets ?? [],
        comments = comments ?? [],
-       attachments = attachments ?? [];
+       attachments = attachments ?? [],
+       targetRegions = targetRegions ?? [],
+       targetCountries = targetCountries ?? [],
+       targetClientIds = targetClientIds ?? [];
 
   // 체크리스트 완성률
   double get checklistProgress {
@@ -895,6 +942,14 @@ class TaskDetail {
     'defaultCountry': defaultCountry,
     'taskAllocatedBudget': taskAllocatedBudget,
     'taskBudgetCurrency': taskBudgetCurrency?.name,
+    'targetRegions': targetRegions,
+    'targetCountries': targetCountries,
+    'targetClientIds': targetClientIds,
+    'strategyFrameworkId': strategyFrameworkId,
+    'strategyObjectiveId': strategyObjectiveId,
+    'strategyActionId': strategyActionId,
+    'deliverableId': deliverableId,
+    'campaignId': campaignId,
   };
 
   factory TaskDetail.fromJson(Map<String, dynamic> j) => TaskDetail(
@@ -943,6 +998,14 @@ class TaskDetail {
     taskBudgetCurrency: j['taskBudgetCurrency'] != null
         ? CurrencyCode.values.firstWhere(
             (e) => e.name == j['taskBudgetCurrency'], orElse: () => CurrencyCode.krw) : null,
+    targetRegions: List<String>.from(j['targetRegions'] as List? ?? []),
+    targetCountries: List<String>.from(j['targetCountries'] as List? ?? []),
+    targetClientIds: List<String>.from(j['targetClientIds'] as List? ?? []),
+    strategyFrameworkId: j['strategyFrameworkId'] as String?,
+    strategyObjectiveId: j['strategyObjectiveId'] as String?,
+    strategyActionId: j['strategyActionId'] as String?,
+    deliverableId: j['deliverableId'] as String?,
+    campaignId: j['campaignId'] as String?,
   );
 }
 
@@ -966,6 +1029,9 @@ class Project {
   final DateTime createdAt;
   DateTime? dueDate;
 
+  // ── 캠페인 연결 ─────────────────────────────────────────
+  String? campaignId;   // 연결된 캠페인 ID
+
   Project({
     required this.id,
     required this.name,
@@ -982,6 +1048,7 @@ class Project {
     required this.iconEmoji,
     required this.createdAt,
     this.dueDate,
+    this.campaignId,
   });
 
   double get completionRate {
@@ -1012,6 +1079,7 @@ class Project {
     'iconEmoji': iconEmoji,
     'createdAt': createdAt.toIso8601String(),
     'dueDate': dueDate?.toIso8601String(),
+    'campaignId': campaignId,
   };
 
   factory Project.fromJson(Map<String, dynamic> j) => Project(
@@ -1037,6 +1105,7 @@ class Project {
     iconEmoji: j['iconEmoji'] as String? ?? '📁',
     createdAt: DateTime.parse(j['createdAt'] as String),
     dueDate: j['dueDate'] != null ? DateTime.parse(j['dueDate'] as String) : null,
+    campaignId: j['campaignId'] as String?,
   );
 }
 
@@ -1056,8 +1125,22 @@ class KpiModel {
   DateTime dueDate;
   String? teamId;
   String? projectId;
-  StrategyPillar? pillar;      // 전략 Pillar
-  String? pillarDescription;   // Pillar 설명
+  StrategyPillar? pillar;
+  String? pillarDescription;
+
+  /// 캠페인/퍼널/Deliverable 연결
+  String? campaignId;        // 연결된 캠페인 ID
+  String? funnelStageKey;    // 연결된 퍼널 단계 key
+  String? deliverableId;     // 연결된 Deliverable ID
+
+  /// 연도별 목표: {'2025': 500000, '2026': 800000}
+  Map<String, double> yearlyTargets;
+
+  /// 분기별 목표: {'2025-Q1': 100000, '2025-Q2': 120000, ...}
+  Map<String, double> quarterlyTargets;
+
+  /// 분기별 실적: {'2025-Q1': 95000, '2025-Q2': 118000, ...}
+  Map<String, double> quarterlyActuals;
 
   KpiModel({
     required this.id,
@@ -1074,16 +1157,41 @@ class KpiModel {
     this.projectId,
     this.pillar,
     this.pillarDescription,
-  });
+    this.campaignId,
+    this.funnelStageKey,
+    this.deliverableId,
+    Map<String, double>? yearlyTargets,
+    Map<String, double>? quarterlyTargets,
+    Map<String, double>? quarterlyActuals,
+  })  : yearlyTargets = yearlyTargets ?? {},
+        quarterlyTargets = quarterlyTargets ?? {},
+        quarterlyActuals = quarterlyActuals ?? {};
 
   double get achievementRate => target > 0 ? (current / target * 100).clamp(0, 200) : 0;
   bool get isOnTrack => achievementRate >= 80;
+
+  /// 특정 연도 목표 달성률
+  double yearlyAchievement(String year, double actualValue) {
+    final t = yearlyTargets[year] ?? target;
+    return t > 0 ? (actualValue / t * 100).clamp(0, 200) : 0;
+  }
+
+  /// 특정 분기 달성률
+  double quarterlyAchievement(String quarterKey) {
+    final t = quarterlyTargets[quarterKey] ?? 0;
+    final a = quarterlyActuals[quarterKey] ?? 0;
+    return t > 0 ? (a / t * 100).clamp(0, 200) : 0;
+  }
 
   KpiModel copyWith({
     String? title, String? category, double? target, double? current,
     String? unit, String? period, String? assignedTo, bool? isTeamKpi,
     DateTime? dueDate, String? teamId, String? projectId,
     StrategyPillar? pillar, String? pillarDescription,
+    String? campaignId, String? funnelStageKey, String? deliverableId,
+    Map<String, double>? yearlyTargets,
+    Map<String, double>? quarterlyTargets,
+    Map<String, double>? quarterlyActuals,
   }) => KpiModel(
     id: id,
     title: title ?? this.title,
@@ -1099,6 +1207,12 @@ class KpiModel {
     projectId: projectId ?? this.projectId,
     pillar: pillar ?? this.pillar,
     pillarDescription: pillarDescription ?? this.pillarDescription,
+    campaignId: campaignId ?? this.campaignId,
+    funnelStageKey: funnelStageKey ?? this.funnelStageKey,
+    deliverableId: deliverableId ?? this.deliverableId,
+    yearlyTargets: yearlyTargets ?? Map.from(this.yearlyTargets),
+    quarterlyTargets: quarterlyTargets ?? Map.from(this.quarterlyTargets),
+    quarterlyActuals: quarterlyActuals ?? Map.from(this.quarterlyActuals),
   );
 
   Map<String, dynamic> toJson() => {
@@ -1116,29 +1230,48 @@ class KpiModel {
     'projectId': projectId,
     'pillar': pillar?.name,
     'pillarDescription': pillarDescription,
+    'campaignId': campaignId,
+    'funnelStageKey': funnelStageKey,
+    'deliverableId': deliverableId,
+    'yearlyTargets': yearlyTargets,
+    'quarterlyTargets': quarterlyTargets,
+    'quarterlyActuals': quarterlyActuals,
   };
 
-  factory KpiModel.fromJson(Map<String, dynamic> j) => KpiModel(
-    id: j['id'] as String,
-    title: j['title'] as String? ?? '',
-    category: j['category'] as String? ?? '',
-    target: (j['target'] as num?)?.toDouble() ?? 0,
-    current: (j['current'] as num?)?.toDouble() ?? 0,
-    unit: j['unit'] as String? ?? '',
-    period: j['period'] as String? ?? '',
-    assignedTo: j['assignedTo'] as String?,
-    isTeamKpi: j['isTeamKpi'] as bool? ?? false,
-    dueDate: j['dueDate'] != null
-        ? DateTime.parse(j['dueDate'] as String)
-        : DateTime.now(),
-    teamId: j['teamId'] as String?,
-    projectId: j['projectId'] as String?,
-    pillar: j['pillar'] != null
-        ? StrategyPillar.values.firstWhere(
-            (e) => e.name == j['pillar'], orElse: () => StrategyPillar.growth)
-        : null,
-    pillarDescription: j['pillarDescription'] as String?,
-  );
+  factory KpiModel.fromJson(Map<String, dynamic> j) {
+    Map<String, double> _toDoubleMap(dynamic raw) {
+      if (raw == null) return {};
+      final m = raw as Map<String, dynamic>;
+      return m.map((k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0));
+    }
+    return KpiModel(
+      id: j['id'] as String,
+      title: j['title'] as String? ?? '',
+      category: j['category'] as String? ?? '',
+      target: (j['target'] as num?)?.toDouble() ?? 0,
+      current: (j['current'] as num?)?.toDouble() ?? 0,
+      unit: j['unit'] as String? ?? '',
+      period: j['period'] as String? ?? '',
+      assignedTo: j['assignedTo'] as String?,
+      isTeamKpi: j['isTeamKpi'] as bool? ?? false,
+      dueDate: j['dueDate'] != null
+          ? DateTime.parse(j['dueDate'] as String)
+          : DateTime.now(),
+      teamId: j['teamId'] as String?,
+      projectId: j['projectId'] as String?,
+      pillar: j['pillar'] != null
+          ? StrategyPillar.values.firstWhere(
+              (e) => e.name == j['pillar'], orElse: () => StrategyPillar.growth)
+          : null,
+      pillarDescription: j['pillarDescription'] as String?,
+      campaignId: j['campaignId'] as String?,
+      funnelStageKey: j['funnelStageKey'] as String?,
+      deliverableId: j['deliverableId'] as String?,
+      yearlyTargets: _toDoubleMap(j['yearlyTargets']),
+      quarterlyTargets: _toDoubleMap(j['quarterlyTargets']),
+      quarterlyActuals: _toDoubleMap(j['quarterlyActuals']),
+    );
+  }
 }
 
 class FunnelStage {
@@ -1586,11 +1719,24 @@ class CampaignModel {
   final String id, name, type, status, channel;
   final double budget, spent, revenue, impressions, clicks, conversions;
   final DateTime startDate, endDate;
-  CampaignModel({required this.id, required this.name, required this.type,
+
+  // ── 팀·KPI·퍼널·전략 연결 ──
+  String? teamId;                  // 소속 팀
+  List<String> kpiIds;             // 연결된 KPI ID 목록
+  String? funnelStageKey;          // 연결된 퍼널 단계 (awareness/consideration/...)
+  String? deliverableId;           // 연결된 Deliverable ID
+  String? description;             // 캠페인 설명
+
+  CampaignModel({
+    required this.id, required this.name, required this.type,
     required this.status, required this.budget, required this.spent,
     required this.revenue, required this.impressions, required this.clicks,
     required this.conversions, required this.startDate, required this.endDate,
-    required this.channel});
+    required this.channel,
+    this.teamId, List<String>? kpiIds, this.funnelStageKey,
+    this.deliverableId, this.description,
+  }) : kpiIds = kpiIds ?? [];
+
   double get roi => spent > 0 ? ((revenue - spent) / spent * 100) : 0;
   double get ctr => impressions > 0 ? (clicks / impressions * 100) : 0;
   double get conversionRate => clicks > 0 ? (conversions / clicks * 100) : 0;
@@ -1598,12 +1744,36 @@ class CampaignModel {
   double get roas => spent > 0 ? (revenue / spent) : 0;
   double get budgetUsedPercent => budget > 0 ? (spent / budget * 100).clamp(0, 100) : 0;
 
+  CampaignModel copyWith({
+    String? name, String? type, String? status, String? channel,
+    double? budget, double? spent, double? revenue,
+    double? impressions, double? clicks, double? conversions,
+    DateTime? startDate, DateTime? endDate,
+    String? teamId, List<String>? kpiIds, String? funnelStageKey,
+    String? deliverableId, String? description,
+  }) => CampaignModel(
+    id: id,
+    name: name ?? this.name, type: type ?? this.type,
+    status: status ?? this.status, channel: channel ?? this.channel,
+    budget: budget ?? this.budget, spent: spent ?? this.spent,
+    revenue: revenue ?? this.revenue, impressions: impressions ?? this.impressions,
+    clicks: clicks ?? this.clicks, conversions: conversions ?? this.conversions,
+    startDate: startDate ?? this.startDate, endDate: endDate ?? this.endDate,
+    teamId: teamId ?? this.teamId,
+    kpiIds: kpiIds ?? List.from(this.kpiIds),
+    funnelStageKey: funnelStageKey ?? this.funnelStageKey,
+    deliverableId: deliverableId ?? this.deliverableId,
+    description: description ?? this.description,
+  );
+
   Map<String, dynamic> toJson() => {
     'id': id, 'name': name, 'type': type, 'status': status, 'channel': channel,
     'budget': budget, 'spent': spent, 'revenue': revenue,
     'impressions': impressions, 'clicks': clicks, 'conversions': conversions,
     'startDate': startDate.toIso8601String(),
     'endDate': endDate.toIso8601String(),
+    'teamId': teamId, 'kpiIds': kpiIds, 'funnelStageKey': funnelStageKey,
+    'deliverableId': deliverableId, 'description': description,
   };
 
   factory CampaignModel.fromJson(Map<String, dynamic> j) => CampaignModel(
@@ -1620,6 +1790,243 @@ class CampaignModel {
     conversions: (j['conversions'] as num?)?.toDouble() ?? 0,
     startDate: j['startDate'] != null ? DateTime.parse(j['startDate'] as String) : DateTime.now(),
     endDate: j['endDate'] != null ? DateTime.parse(j['endDate'] as String) : DateTime.now(),
+    teamId: j['teamId'] as String?,
+    kpiIds: (j['kpiIds'] as List?)?.map((e) => e as String).toList() ?? [],
+    funnelStageKey: j['funnelStageKey'] as String?,
+    deliverableId: j['deliverableId'] as String?,
+    description: j['description'] as String?,
+  );
+}
+
+// ════════════════════════════════════════════════════════
+//  전략 프레임워크 (StrategyFramework)
+//  Brand to Demand → 전략과제 → 전략실행과제 → Deliverable
+// ════════════════════════════════════════════════════════
+
+/// 최하위 실행 항목 (Deliverable)
+class StrategyDeliverable {
+  final String id;
+  String name;
+  String? kpiId;          // 연결된 KPI
+  String? campaignId;     // 연결된 캠페인
+  String? funnelStageKey; // 연결된 퍼널 단계
+  String status;          // 'planned' | 'in_progress' | 'done'
+  String? description;
+  DateTime? dueDate;
+
+  StrategyDeliverable({
+    required this.id,
+    required this.name,
+    this.kpiId,
+    this.campaignId,
+    this.funnelStageKey,
+    this.status = 'planned',
+    this.description,
+    this.dueDate,
+  });
+
+  StrategyDeliverable copyWith({
+    String? name, String? kpiId, String? campaignId,
+    String? funnelStageKey, String? status, String? description, DateTime? dueDate,
+  }) => StrategyDeliverable(
+    id: id,
+    name: name ?? this.name,
+    kpiId: kpiId ?? this.kpiId,
+    campaignId: campaignId ?? this.campaignId,
+    funnelStageKey: funnelStageKey ?? this.funnelStageKey,
+    status: status ?? this.status,
+    description: description ?? this.description,
+    dueDate: dueDate ?? this.dueDate,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'kpiId': kpiId, 'campaignId': campaignId,
+    'funnelStageKey': funnelStageKey, 'status': status,
+    'description': description, 'dueDate': dueDate?.toIso8601String(),
+  };
+
+  factory StrategyDeliverable.fromJson(Map<String, dynamic> j) => StrategyDeliverable(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    kpiId: j['kpiId'] as String?,
+    campaignId: j['campaignId'] as String?,
+    funnelStageKey: j['funnelStageKey'] as String?,
+    status: j['status'] as String? ?? 'planned',
+    description: j['description'] as String?,
+    dueDate: j['dueDate'] != null ? DateTime.tryParse(j['dueDate'] as String) : null,
+  );
+}
+
+/// 전략실행과제 (예: "고객 참여 기반의 수요 전환")
+class StrategyAction {
+  final String id;
+  String name;
+  List<StrategyDeliverable> deliverables;
+
+  StrategyAction({
+    required this.id,
+    required this.name,
+    List<StrategyDeliverable>? deliverables,
+  }) : deliverables = deliverables ?? [];
+
+  StrategyAction copyWith({String? name, List<StrategyDeliverable>? deliverables}) =>
+      StrategyAction(id: id, name: name ?? this.name, deliverables: deliverables ?? List.from(this.deliverables));
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name,
+    'deliverables': deliverables.map((d) => d.toJson()).toList(),
+  };
+
+  factory StrategyAction.fromJson(Map<String, dynamic> j) => StrategyAction(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    deliverables: (j['deliverables'] as List?)
+        ?.map((d) => StrategyDeliverable.fromJson(d as Map<String, dynamic>))
+        .toList() ?? [],
+  );
+}
+
+/// 전략과제 (예: "시장 수요 창출", "시장 기회 확대", "마케팅 효능감")
+class StrategyObjective {
+  final String id;
+  String name;
+  String? description;
+  String colorHex;
+  List<StrategyAction> actions;
+
+  StrategyObjective({
+    required this.id,
+    required this.name,
+    this.description,
+    this.colorHex = '#00C9A7',
+    List<StrategyAction>? actions,
+  }) : actions = actions ?? [];
+
+  StrategyObjective copyWith({
+    String? name, String? description, String? colorHex, List<StrategyAction>? actions,
+  }) => StrategyObjective(
+    id: id, name: name ?? this.name,
+    description: description ?? this.description,
+    colorHex: colorHex ?? this.colorHex,
+    actions: actions ?? List.from(this.actions),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'description': description, 'colorHex': colorHex,
+    'actions': actions.map((a) => a.toJson()).toList(),
+  };
+
+  factory StrategyObjective.fromJson(Map<String, dynamic> j) => StrategyObjective(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    description: j['description'] as String?,
+    colorHex: j['colorHex'] as String? ?? '#00C9A7',
+    actions: (j['actions'] as List?)
+        ?.map((a) => StrategyAction.fromJson(a as Map<String, dynamic>))
+        .toList() ?? [],
+  );
+}
+
+/// 전략 프레임워크 최상위 (예: "Brand to Demand")
+class StrategyFramework {
+  final String id;
+  String name;          // 예: "Brand to Demand"
+  String? description;
+  String teamId;        // 소속 팀
+  String iconEmoji;
+  String colorHex;
+  List<StrategyObjective> objectives;
+
+  StrategyFramework({
+    required this.id,
+    required this.name,
+    required this.teamId,
+    this.description,
+    this.iconEmoji = '🎯',
+    this.colorHex = '#00C9A7',
+    List<StrategyObjective>? objectives,
+  }) : objectives = objectives ?? [];
+
+  /// 모든 Deliverable 평탄화
+  List<StrategyDeliverable> get allDeliverables =>
+      objectives.expand((o) => o.actions.expand((a) => a.deliverables)).toList();
+
+  StrategyFramework copyWith({
+    String? name, String? description, String? iconEmoji,
+    String? colorHex, List<StrategyObjective>? objectives,
+  }) => StrategyFramework(
+    id: id, teamId: teamId,
+    name: name ?? this.name, description: description ?? this.description,
+    iconEmoji: iconEmoji ?? this.iconEmoji, colorHex: colorHex ?? this.colorHex,
+    objectives: objectives ?? List.from(this.objectives),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'teamId': teamId, 'description': description,
+    'iconEmoji': iconEmoji, 'colorHex': colorHex,
+    'objectives': objectives.map((o) => o.toJson()).toList(),
+  };
+
+  factory StrategyFramework.fromJson(Map<String, dynamic> j) => StrategyFramework(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    teamId: j['teamId'] as String? ?? '',
+    description: j['description'] as String?,
+    iconEmoji: j['iconEmoji'] as String? ?? '🎯',
+    colorHex: j['colorHex'] as String? ?? '#00C9A7',
+    objectives: (j['objectives'] as List?)
+        ?.map((o) => StrategyObjective.fromJson(o as Map<String, dynamic>))
+        .toList() ?? [],
+  );
+
+  /// Brand to Demand 기본 프레임워크 생성 헬퍼
+  static StrategyFramework brandToDemand(String teamId) => StrategyFramework(
+    id: 'sf_btd_$teamId',
+    name: 'Brand to Demand',
+    teamId: teamId,
+    iconEmoji: '🚀',
+    colorHex: '#00C9A7',
+    objectives: [
+      StrategyObjective(
+        id: 'obj_demand_$teamId',
+        name: '시장 수요 창출',
+        colorHex: '#00C9A7',
+        actions: [
+          StrategyAction(id: 'act_demand1_$teamId', name: '고객 참여 기반의 수요 전환', deliverables: [
+            StrategyDeliverable(id: 'del_d1_$teamId', name: 'SteerStar 리포지셔닝', status: 'in_progress'),
+            StrategyDeliverable(id: 'del_d2_$teamId', name: '고객사 스토리 등 협업 콘텐츠 강화', status: 'planned'),
+            StrategyDeliverable(id: 'del_d3_$teamId', name: 'CTR FullSet 확장 전개', status: 'planned'),
+            StrategyDeliverable(id: 'del_d4_$teamId', name: 'O2O 마케팅 리드 연계', status: 'in_progress'),
+          ]),
+        ],
+      ),
+      StrategyObjective(
+        id: 'obj_market_$teamId',
+        name: '시장 기회 확대',
+        colorHex: '#29B6F6',
+        actions: [
+          StrategyAction(id: 'act_market1_$teamId', name: '판매 가속화', deliverables: [
+            StrategyDeliverable(id: 'del_m1_$teamId', name: '신규시장 진입 마케팅 패키지 설계', status: 'in_progress'),
+            StrategyDeliverable(id: 'del_m2_$teamId', name: 'Value Proposition_New arrivals', status: 'planned'),
+            StrategyDeliverable(id: 'del_m3_$teamId', name: 'Chago 프로모션 콘텐츠 강화', status: 'in_progress'),
+          ]),
+        ],
+      ),
+      StrategyObjective(
+        id: 'obj_efficiency_$teamId',
+        name: '마케팅 효능감',
+        colorHex: '#FF8A65',
+        actions: [
+          StrategyAction(id: 'act_eff1_$teamId', name: '데이터 기반 효율 강화', deliverables: [
+            StrategyDeliverable(id: 'del_e1_$teamId', name: '지역별 리스크 대응 자료 선제적 제공', status: 'in_progress'),
+            StrategyDeliverable(id: 'del_e2_$teamId', name: 'BizRewards 브랜딩 플랫폼으로 활용', status: 'planned'),
+            StrategyDeliverable(id: 'del_e3_$teamId', name: '데이터 기반 콘텐츠 마케팅', status: 'in_progress'),
+            StrategyDeliverable(id: 'del_e4_$teamId', name: '소셜 광고 효율성 제고', status: 'in_progress'),
+            StrategyDeliverable(id: 'del_e5_$teamId', name: '지역별 마케팅 메시지맵', status: 'planned'),
+          ]),
+        ],
+      ),
+    ],
   );
 }
 
@@ -1680,19 +2087,41 @@ class MarketingRegion {
 // ════════════════════════════════════════════════════════
 class ClientAccount {
   final String id;
-  String name;           // 고객사명
-  String? buyerCode;     // 바이어 코드 (예: B-001, KR-BUYER-01)
-  String? country;       // 나라
-  String? region;        // 권역
-  String? industry;      // 업종
-  String? contactName;   // 담당자 이름
+  String name;           // 고객사명 (이름1)
+  String? buyerCode;     // 바이어 번호 (551-020 등)
+  String? country;       // 국가코드 (VN, AE, KR 등)
+  String? countryName;   // 국가 영문명 (Vietnam, UAE 등)
+  String? region;        // 지역이름2 (아시아 등)
+  String? regionEn;      // Region 영문 (Asia & Pacific 등)
+  String? industry;
+  String? contactName;
   String? contactEmail;
-  String? contactPhone;  // 담당자 연락처
+  String? contactPhone;  // 전화2
   String? note;
   bool isActive;
-  // 성과 데이터 (수동 입력 or 집계)
-  double revenue;        // 해당 고객사 발생 매출
-  double adSpend;        // 광고비
+  String? teamId;        // ← 소속 팀
+
+  // ── SAP 고객사 CSV 전용 필드 ──────────────────────────
+  String? salesOrg;           // 판매 조직 (4200, 1100 등)
+  String? salesOrgName;       // 내역4 (CTR Vina, CTR 등)
+  String? distributionChannel; // 유통경로 (11 등)
+  String? currency;           // 통화 (VND, USD 등)
+  String? salesZone;          // 판매 구역 (1 등)
+  String? incoterms;          // 인코텀스 코드 (EXW, CIF, FOB 등)
+  String? incotermsDesc;      // 내역6 (공장 인도 조건 등)
+  String? soldToParty;        // 판매처 번호
+  String? soldToPartyName;    // 판매처명
+  String? billToParty;        // 청구처 번호
+  String? billToPartyName;    // 청구처명
+  String? shipToParty;        // 납품처 번호
+  String? shipToPartyName;    // 납품처명
+  String? settlementType;     // 결산기준유형 (30, 40 등)
+  String? settlementTypeDesc; // 내역11
+  String? pbOrderType;        // PB오더구분 (1 등)
+  // ─────────────────────────────────────────────────────
+
+  double revenue;
+  double adSpend;
   DateTime createdAt;
 
   ClientAccount({
@@ -1700,13 +2129,32 @@ class ClientAccount {
     required this.name,
     this.buyerCode,
     this.country,
+    this.countryName,
     this.region,
+    this.regionEn,
     this.industry,
     this.contactName,
     this.contactEmail,
     this.contactPhone,
     this.note,
     this.isActive = true,
+    this.teamId,
+    this.salesOrg,
+    this.salesOrgName,
+    this.distributionChannel,
+    this.currency,
+    this.salesZone,
+    this.incoterms,
+    this.incotermsDesc,
+    this.soldToParty,
+    this.soldToPartyName,
+    this.billToParty,
+    this.billToPartyName,
+    this.shipToParty,
+    this.shipToPartyName,
+    this.settlementType,
+    this.settlementTypeDesc,
+    this.pbOrderType,
     this.revenue = 0,
     this.adSpend = 0,
     required this.createdAt,
@@ -1714,12 +2162,28 @@ class ClientAccount {
 
   double get roi => adSpend > 0 ? ((revenue - adSpend) / adSpend * 100) : 0;
 
+  /// 표시용 국가명 (영문명 우선, 없으면 코드)
+  String get displayCountry => countryName?.isNotEmpty == true ? countryName! : (country ?? '');
+  /// 표시용 권역 (한글 우선)
+  String get displayRegion => region?.isNotEmpty == true ? region! : (regionEn ?? '');
+
   Map<String, dynamic> toJson() => {
     'id': id, 'name': name, 'buyerCode': buyerCode,
-    'country': country, 'region': region, 'industry': industry,
+    'country': country, 'countryName': countryName,
+    'region': region, 'regionEn': regionEn,
+    'industry': industry,
     'contactName': contactName, 'contactEmail': contactEmail,
     'contactPhone': contactPhone, 'note': note,
-    'isActive': isActive, 'revenue': revenue, 'adSpend': adSpend,
+    'isActive': isActive, 'teamId': teamId,
+    'salesOrg': salesOrg, 'salesOrgName': salesOrgName,
+    'distributionChannel': distributionChannel, 'currency': currency,
+    'salesZone': salesZone, 'incoterms': incoterms, 'incotermsDesc': incotermsDesc,
+    'soldToParty': soldToParty, 'soldToPartyName': soldToPartyName,
+    'billToParty': billToParty, 'billToPartyName': billToPartyName,
+    'shipToParty': shipToParty, 'shipToPartyName': shipToPartyName,
+    'settlementType': settlementType, 'settlementTypeDesc': settlementTypeDesc,
+    'pbOrderType': pbOrderType,
+    'revenue': revenue, 'adSpend': adSpend,
     'createdAt': createdAt.toIso8601String(),
   };
 
@@ -1728,13 +2192,32 @@ class ClientAccount {
     name: j['name'] as String? ?? '',
     buyerCode: j['buyerCode'] as String?,
     country: j['country'] as String?,
+    countryName: j['countryName'] as String?,
     region: j['region'] as String?,
+    regionEn: j['regionEn'] as String?,
     industry: j['industry'] as String?,
     contactName: j['contactName'] as String?,
     contactEmail: j['contactEmail'] as String?,
     contactPhone: j['contactPhone'] as String?,
     note: j['note'] as String?,
     isActive: j['isActive'] as bool? ?? true,
+    teamId: j['teamId'] as String?,
+    salesOrg: j['salesOrg'] as String?,
+    salesOrgName: j['salesOrgName'] as String?,
+    distributionChannel: j['distributionChannel'] as String?,
+    currency: j['currency'] as String?,
+    salesZone: j['salesZone'] as String?,
+    incoterms: j['incoterms'] as String?,
+    incotermsDesc: j['incotermsDesc'] as String?,
+    soldToParty: j['soldToParty'] as String?,
+    soldToPartyName: j['soldToPartyName'] as String?,
+    billToParty: j['billToParty'] as String?,
+    billToPartyName: j['billToPartyName'] as String?,
+    shipToParty: j['shipToParty'] as String?,
+    shipToPartyName: j['shipToPartyName'] as String?,
+    settlementType: j['settlementType'] as String?,
+    settlementTypeDesc: j['settlementTypeDesc'] as String?,
+    pbOrderType: j['pbOrderType'] as String?,
     revenue: (j['revenue'] as num?)?.toDouble() ?? 0,
     adSpend: (j['adSpend'] as num?)?.toDouble() ?? 0,
     createdAt: j['createdAt'] != null
@@ -1742,22 +2225,48 @@ class ClientAccount {
   );
 
   ClientAccount copyWith({
-    String? name, String? buyerCode, String? country, String? region,
-    String? industry, String? contactName, String? contactEmail,
+    String? name, String? buyerCode, String? country, String? countryName,
+    String? region, String? regionEn, String? industry,
+    String? contactName, String? contactEmail,
     String? contactPhone, String? note, bool? isActive,
+    String? salesOrg, String? salesOrgName, String? distributionChannel,
+    String? currency, String? salesZone, String? incoterms, String? incotermsDesc,
+    String? soldToParty, String? soldToPartyName,
+    String? billToParty, String? billToPartyName,
+    String? shipToParty, String? shipToPartyName,
+    String? settlementType, String? settlementTypeDesc, String? pbOrderType,
     double? revenue, double? adSpend,
   }) => ClientAccount(
     id: id,
     name: name ?? this.name,
     buyerCode: buyerCode ?? this.buyerCode,
     country: country ?? this.country,
+    countryName: countryName ?? this.countryName,
     region: region ?? this.region,
+    regionEn: regionEn ?? this.regionEn,
     industry: industry ?? this.industry,
     contactName: contactName ?? this.contactName,
     contactEmail: contactEmail ?? this.contactEmail,
     contactPhone: contactPhone ?? this.contactPhone,
     note: note ?? this.note,
     isActive: isActive ?? this.isActive,
+    teamId: teamId,
+    salesOrg: salesOrg ?? this.salesOrg,
+    salesOrgName: salesOrgName ?? this.salesOrgName,
+    distributionChannel: distributionChannel ?? this.distributionChannel,
+    currency: currency ?? this.currency,
+    salesZone: salesZone ?? this.salesZone,
+    incoterms: incoterms ?? this.incoterms,
+    incotermsDesc: incotermsDesc ?? this.incotermsDesc,
+    soldToParty: soldToParty ?? this.soldToParty,
+    soldToPartyName: soldToPartyName ?? this.soldToPartyName,
+    billToParty: billToParty ?? this.billToParty,
+    billToPartyName: billToPartyName ?? this.billToPartyName,
+    shipToParty: shipToParty ?? this.shipToParty,
+    shipToPartyName: shipToPartyName ?? this.shipToPartyName,
+    settlementType: settlementType ?? this.settlementType,
+    settlementTypeDesc: settlementTypeDesc ?? this.settlementTypeDesc,
+    pbOrderType: pbOrderType ?? this.pbOrderType,
     revenue: revenue ?? this.revenue,
     adSpend: adSpend ?? this.adSpend,
     createdAt: createdAt,

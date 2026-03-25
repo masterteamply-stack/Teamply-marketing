@@ -18,7 +18,7 @@ class _TeamDetailPageState extends State<TeamDetailPage> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -106,6 +106,7 @@ class _TeamDetailPageState extends State<TeamDetailPage> with SingleTickerProvid
                     Tab(text: '프로젝트'),
                     Tab(text: '팀 멤버'),
                     Tab(text: 'KPI'),
+                    Tab(text: '팀 설정'),
                   ],
                 ),
               ],
@@ -118,6 +119,7 @@ class _TeamDetailPageState extends State<TeamDetailPage> with SingleTickerProvid
                 _ProjectsTab(provider: provider, team: team),
                 _MembersTab(provider: provider, team: team),
                 _TeamKpiTab(provider: provider, team: team),
+                _TeamSettingsTab(provider: provider, team: team),
               ],
             ),
           ),
@@ -127,135 +129,354 @@ class _TeamDetailPageState extends State<TeamDetailPage> with SingleTickerProvid
   }
 
   void _showInviteDialog(BuildContext context, AppProvider provider, Team team) {
-    final emailCtrl = TextEditingController();
+    // 탭: 0 = 기존 사용자 선택, 1 = 이메일로 신규 초대
+    int tabIndex = 0;
     MemberRole role = MemberRole.editor;
-    // 이미 팀에 있는 사용자 제외
-    final allUsers = provider.allUsers.where((u) => team.getMember(u.id) == null).toList();
     AppUser? selectedUser;
+
+    // 신규 이메일 초대용
+    final nameCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    String nameError = '';
+    String emailError = '';
 
     showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (_) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          backgroundColor: AppTheme.bgCard,
-          title: const Text('팀 멤버 초대', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w700)),
-          content: SizedBox(
-            width: 400,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('사용자 선택', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                  const SizedBox(height: 8),
-                  if (allUsers.isEmpty)
+        builder: (ctx, setDialogState) {
+          // 다이얼로그 내에서 최신 팀 상태 반영 (provider에서 실시간 조회)
+          final currentTeam = provider.teams.firstWhere(
+            (t) => t.id == team.id,
+            orElse: () => team,
+          );
+          final availableUsers = provider.allUsers
+              .where((u) => currentTeam.getMember(u.id) == null)
+              .toList();
+
+          bool canInviteExisting = tabIndex == 0 && selectedUser != null;
+          bool canInviteNew = tabIndex == 1 &&
+              nameCtrl.text.trim().isNotEmpty &&
+              emailCtrl.text.trim().contains('@');
+
+          return AlertDialog(
+            backgroundColor: AppTheme.bgCard,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.mintPrimary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.person_add_outlined, color: AppTheme.mintPrimary, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Text('팀 멤버 초대', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w700)),
+            ]),
+            content: SizedBox(
+              width: 440,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 탭 전환 버튼
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: AppTheme.info.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(8),
+                        color: AppTheme.bgCardLight,
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Text('모든 사용자가 이미 팀에 소속되어 있습니다', style: TextStyle(color: AppTheme.textMuted, fontSize: 13)),
-                    )
-                  else
+                      child: Row(children: [
+                        Expanded(child: GestureDetector(
+                          onTap: () => setDialogState(() { tabIndex = 0; selectedUser = null; }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: tabIndex == 0 ? AppTheme.mintPrimary : Colors.transparent,
+                              borderRadius: BorderRadius.circular(7),
+                            ),
+                            child: Text(
+                              '기존 멤버 선택',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: tabIndex == 0 ? Colors.white : AppTheme.textMuted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        )),
+                        Expanded(child: GestureDetector(
+                          onTap: () => setDialogState(() { tabIndex = 1; selectedUser = null; }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: tabIndex == 1 ? AppTheme.mintPrimary : Colors.transparent,
+                              borderRadius: BorderRadius.circular(7),
+                            ),
+                            child: Text(
+                              '이메일로 신규 초대',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: tabIndex == 1 ? Colors.white : AppTheme.textMuted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        )),
+                      ]),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 탭 0: 기존 사용자 목록
+                    if (tabIndex == 0) ...[
+                      Row(children: [
+                        const Text('사용자 선택', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                        const Spacer(),
+                        Text('${availableUsers.length}명 초대 가능', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                      ]),
+                      const SizedBox(height: 8),
+                      if (availableUsers.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgCardLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF1E3040)),
+                          ),
+                          child: Column(children: [
+                            Icon(Icons.check_circle_outline, color: AppTheme.success.withValues(alpha: 0.6), size: 36),
+                            const SizedBox(height: 8),
+                            const Text('모든 사용자가 이미 팀에 소속되어 있습니다', style: TextStyle(color: AppTheme.textMuted, fontSize: 12), textAlign: TextAlign.center),
+                            const SizedBox(height: 4),
+                            const Text('이메일로 신규 초대 탭을 이용하세요', style: TextStyle(color: AppTheme.mintPrimary, fontSize: 11), textAlign: TextAlign.center),
+                          ]),
+                        )
+                      else
+                        Container(
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgCardLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF1E3040)),
+                          ),
+                          child: ListView(
+                            shrinkWrap: true,
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            children: availableUsers.map((u) {
+                              final isSelected = selectedUser?.id == u.id;
+                              final color = u.avatarColor != null
+                                  ? Color(int.parse('0xFF${u.avatarColor!.substring(1)}'))
+                                  : AppTheme.mintPrimary;
+                              return InkWell(
+                                onTap: () => setDialogState(() => selectedUser = isSelected ? null : u),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? AppTheme.mintPrimary.withValues(alpha: 0.12) : Colors.transparent,
+                                    border: isSelected ? Border.all(color: AppTheme.mintPrimary.withValues(alpha: 0.3)) : null,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                  child: Row(children: [
+                                    CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: color.withValues(alpha: 0.25),
+                                      child: Text(u.avatarInitials, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Text(u.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
+                                      Text(u.email, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                                    ])),
+                                    if (isSelected)
+                                      const Icon(Icons.check_circle, color: AppTheme.mintPrimary, size: 18),
+                                  ]),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                    ],
+
+                    // 탭 1: 이메일 직접 입력
+                    if (tabIndex == 1) ...[
+                      const Text('새 멤버 정보 입력', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.info.withValues(alpha: 0.07),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.info.withValues(alpha: 0.2)),
+                        ),
+                        child: const Row(children: [
+                          Icon(Icons.info_outline, color: AppTheme.info, size: 14),
+                          SizedBox(width: 6),
+                          Expanded(child: Text(
+                            '아직 시스템에 없는 신규 멤버를 이름과 이메일로 추가합니다',
+                            style: TextStyle(color: AppTheme.info, fontSize: 11),
+                          )),
+                        ]),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: nameCtrl,
+                        onChanged: (_) => setDialogState(() => nameError = ''),
+                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                        decoration: InputDecoration(
+                          labelText: '이름 *',
+                          hintText: '홍길동',
+                          prefixIcon: const Icon(Icons.person_outline, size: 18),
+                          errorText: nameError.isEmpty ? null : nameError,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: emailCtrl,
+                        onChanged: (_) => setDialogState(() => emailError = ''),
+                        keyboardType: TextInputType.emailAddress,
+                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                        decoration: InputDecoration(
+                          labelText: '이메일 주소 *',
+                          hintText: 'user@company.com',
+                          prefixIcon: const Icon(Icons.email_outlined, size: 18),
+                          errorText: emailError.isEmpty ? null : emailError,
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+                    // 권한 설정 (공통)
+                    const Text('권한 설정', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                    const SizedBox(height: 8),
                     Container(
-                      constraints: const BoxConstraints(maxHeight: 240),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
                         color: AppTheme.bgCardLight,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: const Color(0xFF1E3040)),
                       ),
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: allUsers.map((u) {
-                          final color = u.avatarColor != null ? Color(int.parse('0xFF${u.avatarColor!.substring(1)}')) : AppTheme.mintPrimary;
-                          return RadioListTile<AppUser>(
-                            value: u,
-                            groupValue: selectedUser,
-                            onChanged: (v) => setState(() => selectedUser = v),
-                            activeColor: AppTheme.mintPrimary,
-                            dense: true,
-                            title: Row(children: [
-                              CircleAvatar(radius: 14, backgroundColor: color.withValues(alpha: 0.3), child: Text(u.avatarInitials, style: TextStyle(color: color, fontSize: 10))),
-                              const SizedBox(width: 10),
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text(u.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
-                                Text(u.email, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-                              ])),
-                            ]),
-                          );
-                        }).toList(),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<MemberRole>(
+                          value: role,
+                          isExpanded: true,
+                          dropdownColor: AppTheme.bgCard,
+                          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                          icon: const Icon(Icons.keyboard_arrow_down, color: AppTheme.textMuted, size: 18),
+                          items: MemberRole.values
+                              .where((r) => r != MemberRole.owner)
+                              .map((r) => DropdownMenuItem(
+                                value: r,
+                                child: Row(children: [
+                                  Icon(_roleIcon(r), color: _roleColor(r), size: 14),
+                                  const SizedBox(width: 8),
+                                  Text(r.label, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+                                  const SizedBox(width: 6),
+                                  Text(_roleDesc(r), style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                                ]),
+                              ))
+                              .toList(),
+                          onChanged: (v) { if (v != null) setDialogState(() => role = v); },
+                        ),
                       ),
                     ),
-                  const SizedBox(height: 16),
-                  const Text('권한 설정', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.bgCardLight,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF1E3040)),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<MemberRole>(
-                        value: role,
-                        isExpanded: true,
-                        dropdownColor: AppTheme.bgCard,
-                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                        icon: const Icon(Icons.keyboard_arrow_down, color: AppTheme.textMuted, size: 18),
-                        items: MemberRole.values
-                            .where((r) => r != MemberRole.owner)
-                            .map((r) => DropdownMenuItem(
-                              value: r,
-                              child: Row(children: [
-                                Icon(_roleIcon(r), color: _roleColor(r), size: 14),
-                                const SizedBox(width: 8),
-                                Text(r.label, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
-                                const SizedBox(width: 6),
-                                Text(_roleDesc(r), style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-                              ]),
-                            ))
-                            .toList(),
-                        onChanged: (v) { if (v != null) setState(() => role = v); },
+
+                    // 선택된 사용자 미리보기 (탭0)
+                    if (tabIndex == 0 && selectedUser != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.mintPrimary.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.mintPrimary.withValues(alpha: 0.25)),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.check_circle, color: AppTheme.mintPrimary, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${selectedUser!.name} (${selectedUser!.email}) → ${role.label}로 초대',
+                            style: const TextStyle(color: AppTheme.mintPrimary, fontSize: 12),
+                          ),
+                        ]),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: emailCtrl,
-                    style: const TextStyle(color: AppTheme.textPrimary),
-                    decoration: const InputDecoration(
-                      labelText: '이메일로 초대 (선택)',
-                      hintText: 'user@company.com',
-                      prefixIcon: Icon(Icons.email_outlined),
-                    ),
-                  ),
-                ],
+                    ],
+                  ],
+                ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-            ElevatedButton(
-              onPressed: () {
-                if (selectedUser != null) {
-                  provider.inviteMember(team.id, selectedUser!.id, role);
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('${selectedUser!.name}을(를) ${role.label}로 초대했습니다'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('취소', style: TextStyle(color: AppTheme.textMuted)),
+              ),
+              ElevatedButton.icon(
+                onPressed: (canInviteExisting || canInviteNew) ? () {
+                  if (tabIndex == 0 && selectedUser != null) {
+                    // 기존 사용자 초대
+                    provider.inviteMember(team.id, selectedUser!.id, role);
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('✅ ${selectedUser!.name}을(를) ${role.label}로 추가했습니다'),
                       backgroundColor: AppTheme.success,
+                      behavior: SnackBarBehavior.floating,
                       duration: const Duration(seconds: 2),
-                    ),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.mintPrimary),
-              child: const Text('초대', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
+                    ));
+                  } else if (tabIndex == 1) {
+                    // 유효성 검사
+                    bool hasError = false;
+                    if (nameCtrl.text.trim().isEmpty) {
+                      setDialogState(() => nameError = '이름을 입력해주세요');
+                      hasError = true;
+                    }
+                    final email = emailCtrl.text.trim();
+                    if (email.isEmpty) {
+                      setDialogState(() => emailError = '이메일을 입력해주세요');
+                      hasError = true;
+                    } else if (!email.contains('@') || !email.contains('.')) {
+                      setDialogState(() => emailError = '올바른 이메일 형식이 아닙니다');
+                      hasError = true;
+                    }
+                    // 중복 이메일 체크
+                    final alreadyMember = currentTeam.members.any(
+                      (m) => m.user.email.toLowerCase() == email.toLowerCase()
+                    );
+                    if (alreadyMember) {
+                      setDialogState(() => emailError = '이미 팀에 소속된 이메일입니다');
+                      hasError = true;
+                    }
+                    if (!hasError) {
+                      provider.inviteMemberByEmail(
+                        teamId: team.id,
+                        email: email,
+                        name: nameCtrl.text.trim(),
+                        role: role,
+                      );
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('✅ ${nameCtrl.text.trim()}을(를) ${role.label}로 초대했습니다'),
+                        backgroundColor: AppTheme.success,
+                        behavior: SnackBarBehavior.floating,
+                        duration: const Duration(seconds: 2),
+                      ));
+                    }
+                  }
+                } : null,
+                icon: const Icon(Icons.person_add_outlined, size: 15),
+                label: const Text('초대하기'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.mintPrimary,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppTheme.bgCardLight,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1065,4 +1286,264 @@ class _Badge extends StatelessWidget {
       ]),
     );
   }
+}
+
+// ════════════════════════════════════════════════════════
+//  팀 설정 탭 – 예산, 환율, 고객 파라미터
+// ════════════════════════════════════════════════════════
+class _TeamSettingsTab extends StatefulWidget {
+  final AppProvider provider;
+  final Team team;
+  const _TeamSettingsTab({required this.provider, required this.team});
+  @override
+  State<_TeamSettingsTab> createState() => _TeamSettingsTabState();
+}
+
+class _TeamSettingsTabState extends State<_TeamSettingsTab> {
+  late TextEditingController _budgetCtrl;
+  late TextEditingController _usdRateCtrl;
+  late TextEditingController _eurRateCtrl;
+  late TextEditingController _marketCtrl;
+  late String _selectedCurrency;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final t = widget.team;
+    _budgetCtrl = TextEditingController(text: t.annualBudget != null ? t.annualBudget!.toStringAsFixed(0) : '');
+    _usdRateCtrl = TextEditingController(text: t.exchangeRateUsd.toStringAsFixed(0));
+    _eurRateCtrl = TextEditingController(text: t.exchangeRateEur.toStringAsFixed(0));
+    _marketCtrl = TextEditingController(text: t.targetMarket ?? '');
+    _selectedCurrency = t.budgetCurrency;
+  }
+
+  @override
+  void dispose() {
+    _budgetCtrl.dispose();
+    _usdRateCtrl.dispose();
+    _eurRateCtrl.dispose();
+    _marketCtrl.dispose();
+    super.dispose();
+  }
+
+  void _save() async {
+    setState(() => _saving = true);
+    widget.provider.updateTeamSettings(
+      widget.team.id,
+      annualBudget: double.tryParse(_budgetCtrl.text.replaceAll(',', '')),
+      budgetCurrency: _selectedCurrency,
+      exchangeRateUsd: double.tryParse(_usdRateCtrl.text.replaceAll(',', '')) ?? widget.team.exchangeRateUsd,
+      exchangeRateEur: double.tryParse(_eurRateCtrl.text.replaceAll(',', '')) ?? widget.team.exchangeRateEur,
+      targetMarket: _marketCtrl.text.trim().isEmpty ? null : _marketCtrl.text.trim(),
+    );
+    await Future.delayed(const Duration(milliseconds: 300));
+    setState(() => _saving = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('✅ 팀 설정이 저장되었습니다'),
+        backgroundColor: Color(0xFF00BFA5),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final team = widget.team;
+    final isMobile = MediaQuery.of(context).size.width < 768;
+    final teamColor = Color(int.parse('0xFF${team.colorHex.substring(1)}'));
+    final clients = widget.provider.teamClients;
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(isMobile ? 16 : 28),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // 예산 섹션
+        _SettingsSection(
+          title: '예산 설정',
+          icon: Icons.account_balance_wallet_outlined,
+          color: AppTheme.success,
+          children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('연간 팀 예산', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _budgetCtrl,
+                  style: const TextStyle(color: AppTheme.textPrimary),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    hintText: '예: 500000000',
+                    hintStyle: const TextStyle(color: AppTheme.textMuted),
+                    prefixIcon: Text(_selectedCurrency == 'KRW' ? '₩' : _selectedCurrency == 'USD' ? '\$' : '€',
+                        style: const TextStyle(color: AppTheme.textMuted, fontSize: 16)),
+                  ),
+                ),
+              ])),
+              const SizedBox(width: 16),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('통화', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                DropdownButton<String>(
+                  value: _selectedCurrency,
+                  dropdownColor: AppTheme.bgCard,
+                  style: const TextStyle(color: AppTheme.textPrimary),
+                  items: const [
+                    DropdownMenuItem(value: 'KRW', child: Text('🇰🇷 KRW')),
+                    DropdownMenuItem(value: 'USD', child: Text('🇺🇸 USD')),
+                    DropdownMenuItem(value: 'EUR', child: Text('🇪🇺 EUR')),
+                  ],
+                  onChanged: (v) => setState(() => _selectedCurrency = v ?? 'KRW'),
+                ),
+              ]),
+            ]),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // 환율 섹션
+        _SettingsSection(
+          title: '환율 설정',
+          icon: Icons.currency_exchange,
+          color: AppTheme.info,
+          children: [
+            const Text('1 USD = ? KRW', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _usdRateCtrl,
+              style: const TextStyle(color: AppTheme.textPrimary),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                hintText: '예: 1350',
+                hintStyle: TextStyle(color: AppTheme.textMuted),
+                prefixIcon: Icon(Icons.attach_money, color: AppTheme.textMuted, size: 16),
+                suffixText: 'KRW',
+                suffixStyle: TextStyle(color: AppTheme.textMuted),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('1 EUR = ? KRW', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _eurRateCtrl,
+              style: const TextStyle(color: AppTheme.textPrimary),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                hintText: '예: 1480',
+                hintStyle: TextStyle(color: AppTheme.textMuted),
+                prefixIcon: Icon(Icons.euro, color: AppTheme.textMuted, size: 16),
+                suffixText: 'KRW',
+                suffixStyle: TextStyle(color: AppTheme.textMuted),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // 고객/시장 섹션
+        _SettingsSection(
+          title: '타겟 시장 & 고객',
+          icon: Icons.public,
+          color: AppTheme.warning,
+          children: [
+            const Text('타겟 시장/권역', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _marketCtrl,
+              style: const TextStyle(color: AppTheme.textPrimary),
+              decoration: const InputDecoration(
+                hintText: '예: 동남아시아, 북미, 글로벌',
+                hintStyle: TextStyle(color: AppTheme.textMuted),
+                prefixIcon: Icon(Icons.map_outlined, color: AppTheme.textMuted, size: 16),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // 연결 고객사 목록 (읽기 전용 표시)
+            Row(children: [
+              const Icon(Icons.business_outlined, color: AppTheme.textMuted, size: 14),
+              const SizedBox(width: 6),
+              Text('연결 고객사 (${clients.length}개)', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+            ]),
+            const SizedBox(height: 8),
+            if (clients.isEmpty)
+              const Text('등록된 고객사가 없습니다. 고객사 관리에서 추가하세요.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11))
+            else
+              Wrap(
+                spacing: 8, runSpacing: 6,
+                children: clients.map((c) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.bgCardLight,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF1E3040)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.business, color: AppTheme.textMuted, size: 12),
+                    const SizedBox(width: 5),
+                    Text(c.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 11)),
+                    if (c.isActive) ...[
+                      const SizedBox(width: 5),
+                      Container(
+                        width: 6, height: 6,
+                        decoration: const BoxDecoration(color: AppTheme.success, shape: BoxShape.circle),
+                      ),
+                    ],
+                  ]),
+                )).toList(),
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // 저장 버튼
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: _saving
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.save_outlined, size: 16),
+            label: Text(_saving ? '저장 중...' : '설정 저장'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: teamColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final List<Widget> children;
+  const _SettingsSection({required this.title, required this.icon, required this.color, required this.children});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: AppTheme.bgCard,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: color.withValues(alpha: 0.3)),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
+          child: Icon(icon, color: color, size: 14),
+        ),
+        const SizedBox(width: 8),
+        Text(title, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+      ]),
+      const SizedBox(height: 14),
+      ...children,
+    ]),
+  );
 }

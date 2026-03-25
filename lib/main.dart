@@ -4,10 +4,12 @@ import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'firebase_options.dart';
 import 'theme/app_theme.dart';
 import 'providers/app_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/marketing_dashboard_provider.dart';
 import 'widgets/desktop_shell.dart';
 import 'widgets/mobile_shell.dart';
 import 'screens/auth/intro_page.dart';
@@ -15,6 +17,40 @@ import 'screens/auth/login_page.dart';
 import 'screens/settings/client_management_page.dart';
 import 'screens/settings/region_management_page.dart';
 import 'l10n/app_localizations.dart';
+
+// ─────────────────────────────────────────────────────────────
+//  Supabase 설정
+//  Project ID : waxjtcxdgulbdofycywr
+//  URL        : https://waxjtcxdgulbdofycywr.supabase.co
+//  Anon Key   : Supabase Dashboard > Settings > API > anon public
+// ─────────────────────────────────────────────────────────────
+const _supabaseUrl = 'https://waxjtcxdgulbdofycywr.supabase.co';
+
+const _supabaseAnonKey =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'
+    '.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndheGp0Y3hkZ3VsYmRvZnljeXdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMjc3NTIsImV4cCI6MjA4ODgwMzc1Mn0'
+    '.rvkmwG-dsjeFfT2NAMUJaKjCBMm2SOmAQ1SXl3V3jHI';
+
+Future<void> _safeInitSupabase() async {
+  if (_supabaseAnonKey == 'PASTE_YOUR_ANON_KEY_HERE' ||
+      _supabaseAnonKey.isEmpty) {
+    if (kDebugMode) {
+      debugPrint('[Supabase] ⚠️  Anon Key 미설정 → 오프라인 모드로 실행');
+      debugPrint('[Supabase] lib/main.dart 의 _supabaseAnonKey 를 설정해주세요');
+    }
+    return;
+  }
+  try {
+    await Supabase.initialize(
+      url: _supabaseUrl,
+      anonKey: _supabaseAnonKey,
+      debug: kDebugMode,
+    );
+    if (kDebugMode) debugPrint('[Supabase] ✅ 연결 완료 → $_supabaseUrl');
+  } catch (e) {
+    if (kDebugMode) debugPrint('[Supabase] init error: $e');
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 //  Firebase 안전 초기화 (타임아웃 5초, 실패 시 오프라인 모드)
@@ -34,7 +70,7 @@ Future<void> _safeInitFirebase() async {
     }
   });
 
-  Future<void> _init() async {
+  Future<void> doInit() async {
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
@@ -47,8 +83,8 @@ Future<void> _safeInitFirebase() async {
       if (!completer.isCompleted) completer.complete();
     }
   }
-  _init();
 
+  doInit();
   await completer.future;
 }
 
@@ -58,6 +94,10 @@ Future<void> _safeInitFirebase() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 1) Supabase 먼저 초기화 (URL/KEY 있을 때만)
+  await _safeInitSupabase();
+
+  // 2) Firebase 초기화 (타임아웃 5초)
   await _safeInitFirebase();
 
   final authProvider = AuthProvider();
@@ -67,12 +107,15 @@ void main() async {
     if (kDebugMode) debugPrint('[Auth] initialize timeout: $e');
     authProvider.forceUnauthenticated();
   }
+  // Supabase OAuth 콜백 리스너 등록 (Google 로그인 콜백 처리)
+  authProvider.listenToAuthStateChanges();
 
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: authProvider),
         ChangeNotifierProvider(create: (_) => AppProvider()),
+        ChangeNotifierProvider(create: (_) => MarketingDashboardProvider()),
       ],
       child: const TeamplyApp(),
     ),
@@ -134,12 +177,14 @@ class _AppRouterState extends State<_AppRouter> {
   void _handleAuthChange() {
     final auth = context.read<AuthProvider>();
     final app  = context.read<AppProvider>();
+    final mkt  = context.read<MarketingDashboardProvider>();
 
     if (!auth.isAuthenticated) {
-      // 로그아웃 시 AppProvider 초기화
+      // 로그아웃 시 전체 초기화
       if (_loadedUid != null) {
         _loadedUid = null;
         app.clearUid();
+        mkt.clearAll();
       }
       return;
     }
@@ -151,7 +196,7 @@ class _AppRouterState extends State<_AppRouter> {
     // 마이크로태스크로 처리해 build 중 setState 충돌 방지
     Future.microtask(() async {
       if (!mounted) return;
-      // AuthUser 정보를 AppProvider에 반영
+      // 1) AuthUser 정보를 AppProvider에 반영
       final user = auth.user!;
       app.syncAuthUser(
         uid: user.id,
@@ -159,15 +204,39 @@ class _AppRouterState extends State<_AppRouter> {
         email: user.email,
         avatarUrl: user.avatarUrl,
       );
+      // 2) AppProvider 데이터 로드 (팀/프로젝트/KPI/캠페인 등)
       await app.setUidAndLoad(uid);
-      // 로그인 후 기본 팀 대시보드로 자동 이동
+      if (!mounted) return;
+      // 3) MarketingDashboardProvider 데이터 로드
+      final teamId = app.selectedTeam?.id ?? uid;
+      await mkt.loadTeamData(teamId, uid: uid);
+      // 4) 대시보드 자동 이동
       if (!mounted) return;
       if (app.selectedTeam != null) {
-        // 기본 팀이 있으면 팀 상세 → 대시보드 순으로 이동
         app.navigateTo('dashboard');
-        if (kDebugMode) debugPrint('[AppRouter] Auto-navigated to dashboard for team: ${app.selectedTeam!.name}');
+        if (kDebugMode) {
+          debugPrint('[AppRouter] → dashboard (team: ${app.selectedTeam!.name})');
+        }
       }
+      // 5) Supabase user_meta 업데이트 (로그인 시각 갱신)
+      _updateUserMeta(user.id, user.email, user.displayName);
     });
+  }
+
+  void _updateUserMeta(String uid, String email, String displayName) {
+    try {
+      final db = Supabase.instance.client;
+      db.from('user_meta').upsert({
+        'uid': uid,
+        'email': email,
+        'display_name': displayName,
+        'last_seen': DateTime.now().toIso8601String(),
+      }, onConflict: 'uid').then((_) {
+        if (kDebugMode) debugPrint('[AppRouter] user_meta updated ✅');
+      }).catchError((e) {
+        if (kDebugMode) debugPrint('[AppRouter] user_meta update failed: $e');
+      });
+    } catch (_) {}
   }
 
   @override

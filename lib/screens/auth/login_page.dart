@@ -49,9 +49,11 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       if (agreed != true) return;
     }
     final ok = await loginFn();
-    if (ok && mounted) {
-      // _AppRouter가 auth 상태 변화를 감지해 자동으로 setUidAndLoad + 대시보드 전환
-      // 명시적으로도 호출해서 확실히 처리
+    if (!mounted) return;
+
+    // Google OAuth: ok=false여도 페이지 이동 중이면 정상
+    // ok=true이면 즉시 세션 확보된 경우 (mock 등)
+    if (ok) {
       final uid = auth.user?.id;
       if (uid != null) {
         final app = context.read<AppProvider>();
@@ -64,6 +66,8 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         await app.setUidAndLoad(uid);
       }
     }
+    // ok=false + 에러 없음 = Google 리다이렉트 진행 중 → 아무것도 안 해도 됨
+    // (페이지가 Google로 이동하여 돌아오면 onAuthStateChange가 처리)
   }
 
   // ── Email Login ──────────────────────────────────────────
@@ -255,29 +259,26 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       children: [
         // Google
         _SocialButton(
-          icon: Icons.g_mobiledata_rounded,
-          iconColor: const Color(0xFFDB4437),
+          svgIcon: _SocialIcon.google,
           label: l10n.continueWithGoogle,
           isLoading: auth.isLoading,
           onTap: () => _socialLogin(auth.signInWithGoogle),
         ),
         const SizedBox(height: 10),
-        // Facebook
+        // Microsoft
         _SocialButton(
-          icon: Icons.facebook_rounded,
-          iconColor: const Color(0xFF1877F2),
-          label: l10n.continueWithFacebook,
+          svgIcon: _SocialIcon.microsoft,
+          label: l10n.continueWithMicrosoft,
           isLoading: auth.isLoading,
-          onTap: () => _socialLogin(auth.signInWithFacebook),
+          onTap: () => _socialLogin(auth.signInWithMicrosoft),
         ),
         const SizedBox(height: 10),
-        // WhatsApp
+        // Apple
         _SocialButton(
-          icon: Icons.chat_rounded,
-          iconColor: const Color(0xFF25D366),
-          label: l10n.continueWithWhatsApp,
+          svgIcon: _SocialIcon.apple,
+          label: l10n.continueWithApple,
           isLoading: auth.isLoading,
-          onTap: () => _socialLogin(auth.signInWithWhatsApp),
+          onTap: () => _socialLogin(auth.signInWithApple),
         ),
       ],
     );
@@ -568,17 +569,18 @@ class _InputField extends StatelessWidget {
   }
 }
 
+// ── Social Icon Type ──────────────────────────────────────────
+enum _SocialIcon { google, microsoft, apple }
+
 // ── Social Button ─────────────────────────────────────────────
 class _SocialButton extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
+  final _SocialIcon svgIcon;
   final String label;
   final bool isLoading;
   final VoidCallback onTap;
 
   const _SocialButton({
-    required this.icon,
-    required this.iconColor,
+    required this.svgIcon,
     required this.label,
     required this.isLoading,
     required this.onTap,
@@ -599,7 +601,7 @@ class _SocialButton extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, color: iconColor, size: 22),
+            _buildIcon(),
             Expanded(
               child: Text(label,
                   textAlign: TextAlign.center,
@@ -610,6 +612,140 @@ class _SocialButton extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildIcon() {
+    switch (svgIcon) {
+      case _SocialIcon.google:
+        return _GoogleIcon();
+      case _SocialIcon.microsoft:
+        return _MicrosoftIcon();
+      case _SocialIcon.apple:
+        return _AppleIcon();
+    }
+  }
+}
+
+// ── Google 컬러 아이콘 ─────────────────────────────────────────
+class _GoogleIcon extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 22,
+      height: 22,
+      child: CustomPaint(painter: _GoogleIconPainter()),
+    );
+  }
+}
+
+class _GoogleIconPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+
+    // 배경 원
+    final bgPaint = Paint()..color = Colors.white;
+    canvas.drawCircle(center, radius, bgPaint);
+
+    // G 모양 그리기 (4색)
+    final paintRed    = Paint()..color = const Color(0xFFDB4437)..style = PaintingStyle.fill;
+    final paintBlue   = Paint()..color = const Color(0xFF4285F4)..style = PaintingStyle.fill;
+    final paintYellow = Paint()..color = const Color(0xFFF4B400)..style = PaintingStyle.fill;
+    final paintGreen  = Paint()..color = const Color(0xFF0F9D58)..style = PaintingStyle.fill;
+
+    final s = size.width;
+    // Red (top-right arc)
+    final pathR = Path()
+      ..moveTo(s * 0.5, s * 0.2)
+      ..arcTo(Rect.fromCircle(center: center, radius: s * 0.38),
+          -1.2, 1.2, false)
+      ..lineTo(s * 0.5, s * 0.5)
+      ..close();
+    canvas.drawPath(pathR, paintRed);
+
+    // Blue (right arc + horizontal bar)
+    final pathB = Path()
+      ..moveTo(s * 0.88, s * 0.5)
+      ..lineTo(s * 0.5, s * 0.5)
+      ..lineTo(s * 0.5, s * 0.38)
+      ..lineTo(s * 0.88, s * 0.38)
+      ..close();
+    canvas.drawPath(pathB, paintBlue);
+
+    // Yellow (bottom-right arc)
+    final pathY = Path()
+      ..moveTo(s * 0.78, s * 0.72)
+      ..arcTo(Rect.fromCircle(center: center, radius: s * 0.38),
+          0.0, 0.9, false)
+      ..lineTo(s * 0.5, s * 0.5)
+      ..close();
+    canvas.drawPath(pathY, paintYellow);
+
+    // Green (bottom-left arc)
+    final pathG = Path()
+      ..moveTo(s * 0.22, s * 0.72)
+      ..arcTo(Rect.fromCircle(center: center, radius: s * 0.38),
+          1.6, 1.6, false)
+      ..lineTo(s * 0.5, s * 0.5)
+      ..close();
+    canvas.drawPath(pathG, paintGreen);
+
+    // 중앙 흰색 원 (오버레이로 G 공백 만들기)
+    canvas.drawCircle(center, s * 0.22, bgPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ── Microsoft 컬러 아이콘 ─────────────────────────────────────
+class _MicrosoftIcon extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 22,
+      height: 22,
+      child: CustomPaint(painter: _MicrosoftIconPainter()),
+    );
+  }
+}
+
+class _MicrosoftIconPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width;
+    final gap = s * 0.06;
+    final half = (s - gap) / 2;
+
+    // Windows 4색 사각형
+    final rects = [
+      Rect.fromLTWH(0, 0, half, half),                 // 빨강 (왼위)
+      Rect.fromLTWH(half + gap, 0, half, half),         // 초록 (오른위)
+      Rect.fromLTWH(0, half + gap, half, half),         // 파랑 (왼아래)
+      Rect.fromLTWH(half + gap, half + gap, half, half),// 노랑 (오른아래)
+    ];
+    final colors = [
+      const Color(0xFFF25022),
+      const Color(0xFF7FBA00),
+      const Color(0xFF00A4EF),
+      const Color(0xFFFFB900),
+    ];
+
+    for (int i = 0; i < 4; i++) {
+      canvas.drawRect(rects[i], Paint()..color = colors[i]);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ── Apple 아이콘 ──────────────────────────────────────────────
+class _AppleIcon extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return const Icon(Icons.apple_rounded, color: Colors.white, size: 22);
   }
 }
 
